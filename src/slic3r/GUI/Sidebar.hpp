@@ -76,6 +76,8 @@ class Sidebar : public wxPanel
     BitmapComboBox*                     m_workflow          { nullptr };
     std::vector<sla::Workflow>          m_available_workflows;
     std::vector<PlaterPresetComboBox*>  m_combos_filament;
+    // Extruder numbers shown next to the filament combo boxes of a multi-extruder printer.
+    std::vector<wxWindow*>              m_filament_badges;
 
     ObjectList*     m_object_list               { nullptr };
     ObjectInfo*     m_object_info               { nullptr };
@@ -112,6 +114,8 @@ class Sidebar : public wxPanel
     void init_workflow_combo(int margin_5);
 
     void show_preset_comboboxes();
+    wxWindow* add_filament_badge(wxBoxSizer* sizer, int extr_idx);
+    void update_filament_badges_visibility();
     void on_select_preset(wxCommandEvent& evt);
 
 public:
@@ -155,6 +159,11 @@ public:
 
     void collapse(bool collapse);
     void set_extruders_count(size_t extruders_count);
+    // Exchange two extruders (0-based) including their filaments, colors and everything in the project referencing them.
+    void swap_extruders(size_t extruder_a, size_t extruder_b);
+    // To be called after an Undo / Redo jump: If the jump crossed swap_extruders(), move the data kept outside of the Undo / Redo
+    // snapshots accordingly. old_permutation is Model::extruder_permutation before the jump.
+    void update_extruders_after_undo_redo(const std::vector<unsigned int> &old_permutation);
 
     void update_mode();
     void update_ui_from_settings();

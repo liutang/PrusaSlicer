@@ -21,11 +21,16 @@
 #include "FrequentlyChangedParameters.hpp"
 #include "Plater.hpp"
 
+#include <algorithm>
 #include <cstddef>
+#include <map>
+#include <numeric>
+#include <vector>
 #include <string>
 #include <boost/algorithm/string.hpp>
 
 #include <wx/sizer.h>
+#include <wx/dcclient.h>
 #include <wx/stattext.h>
 #include <wx/button.h>
 #include <wx/bmpcbox.h>
@@ -149,6 +154,38 @@ renumber_virtual_extruders(Plater& plater, unsigned int num_physical, bool take_
     }
     return true;
 }
+
+// Number of the extruder shown as a cell attached to the left side of its filament combo box.
+class ExtruderBadge : public wxWindow
+{
+    wxString m_label;
+public:
+    ExtruderBadge(wxWindow *parent, int number) :
+        wxWindow(parent, wxID_ANY), m_label(wxString::Format("%d", number))
+    {
+        SetFont(wxGetApp().bold_font());
+        SetMinSize(wxSize(int(2.2 * wxGetApp().em_unit()), -1));
+        Bind(wxEVT_PAINT, [this](wxPaintEvent&) {
+            wxPaintDC dc(this);
+            const bool is_dark = wxGetApp().dark_mode();
+            wxRect rc(GetClientSize());
+#ifdef __WXOSX__
+            // Follow StaticBox::doRender(), so that the borders are aligned with the combo box.
+            if (dc.GetContentScaleFactor() > 1.)
+                rc.Deflate(1, 1);
+#endif //__WXOSX__
+            const wxRect text_rc = rc;
+            // The right border is clipped away, the left border of the combo box separates the two.
+            rc.SetRight(GetClientSize().GetWidth() + 1);
+            dc.SetPen(wxPen(wxColour(0x64, 0x64, 0x64)));
+            dc.SetBrush(wxBrush(is_dark ? wxColour(0x40, 0x40, 0x40) : wxColour(0xF6, 0xF6, 0xF6)));
+            dc.DrawRectangle(rc);
+            dc.SetFont(GetFont());
+            dc.SetTextForeground(is_dark ? wxColour(0xE0, 0xE0, 0xE0) : wxColour(0x26, 0x2E, 0x30));
+            dc.DrawLabel(m_label, text_rc, wxALIGN_CENTER);
+        });
+    }
+};
 
 class ObjectInfo : public wxStaticBoxSizer
 {
@@ -323,6 +360,8 @@ void Sidebar::show_preset_comboboxes()
     for (size_t i = 5; i < 9; ++i)
         m_presets_sizer->Show(i, showSLA);
 
+    update_filament_badges_visibility();
+
     m_frequently_changed_parameters->Show(!showSLA);
 
     const Tab* tab = wxGetApp().get_tab(Preset::TYPE_PRINTER);
@@ -454,6 +493,8 @@ Sidebar::Sidebar(Plater *parent)
         *combo = new PlaterPresetComboBox(m_presets_panel, preset_type);
 
         auto combo_and_btn_sizer = new wxBoxSizer(wxHORIZONTAL);
+        if (filament)
+            add_filament_badge(combo_and_btn_sizer, 0);
         combo_and_btn_sizer->Add(*combo, 1, wxEXPAND);
         if ((*combo)->edit_btn)
             combo_and_btn_sizer->Add((*combo)->edit_btn, 0, wxALIGN_CENTER_VERTICAL|wxLEFT|wxRIGHT,
@@ -755,6 +796,7 @@ void Sidebar::init_filament_combo(PlaterPresetComboBox** combo, int extr_idx)
     (*combo)->set_extruder_idx(extr_idx);
 
     auto combo_and_btn_sizer = new wxBoxSizer(wxHORIZONTAL);
+    add_filament_badge(combo_and_btn_sizer, extr_idx);
     combo_and_btn_sizer->Add(*combo, 1, wxEXPAND);
     combo_and_btn_sizer->Add((*combo)->edit_btn, 0, wxALIGN_CENTER_VERTICAL | wxLEFT | wxRIGHT,
                             int(0.3*wxGetApp().em_unit()));
@@ -767,6 +809,23 @@ void Sidebar::init_filament_combo(PlaterPresetComboBox** combo, int extr_idx)
 #endif // __WXGTK3__
 }
 
+wxWindow* Sidebar::add_filament_badge(wxBoxSizer* sizer, int extr_idx)
+{
+    assert(size_t(extr_idx) == m_filament_badges.size());
+    wxWindow* badge = new ExtruderBadge(m_presets_panel, extr_idx + 1);
+    sizer->Add(badge, 0, wxEXPAND);
+    m_filament_badges.push_back(badge);
+    return badge;
+}
+
+void Sidebar::update_filament_badges_visibility()
+{
+    const bool show = m_filament_badges.size() > 1 &&
+        wxGetApp().preset_bundle->printers.get_edited_preset().printer_technology() != ptSLA;
+    for (wxWindow* badge : m_filament_badges)
+        badge->Show(show);
+}
+
 void Sidebar::remove_unused_filament_combos(const size_t current_extruder_count)
 {
     if (current_extruder_count >= m_combos_filament.size())
@@ -777,6 +836,8 @@ void Sidebar::remove_unused_filament_combos(const size_t current_extruder_count)
         sizer_filaments->Remove(last);
         (*m_combos_filament[last]).Destroy();
         m_combos_filament.pop_back();
+        m_filament_badges.back()->Destroy();
+        m_filament_badges.pop_back();
     }
 }
 
@@ -1607,6 +1668,157 @@ void Sidebar::update_ui_from_settings()
     m_object_list->apply_volumes_order();
 }
 
+// Move the per extruder data stored in the presets and in the project config: The extruder i takes over the data of the extruder source[i].
+static void permute_extruders_in_presets(const std::vector<size_t> &source)
+{
+    PresetBundle &preset_bundle = *wxGetApp().preset_bundle;
+    const size_t  cnt           = source.size();
+    assert(cnt == preset_bundle.extruders_filaments.size());
+
+    // 1-based new extruder ID for a 1-based old extruder ID.
+    auto moved_to = [&source, cnt](int extruder) {
+        for (size_t i = 0; i < cnt; ++i)
+            if (int(source[i]) + 1 == extruder)
+                return int(i) + 1;
+        return extruder;
+    };
+
+    // Filaments.
+    std::vector<std::string> filaments;
+    filaments.reserve(cnt);
+    for (size_t i = 0; i < cnt; ++i)
+        filaments.emplace_back(preset_bundle.extruders_filaments[i].get_selected_preset_name());
+    for (size_t i = 0; i < cnt; ++i)
+        if (filaments[source[i]] != filaments[i])
+            preset_bundle.set_filament_preset(i, filaments[source[i]]);
+
+    // The edited filament preset belongs to the active extruder of the filament tab, so let the tab follow its filament.
+    if (TabFilament *tab = dynamic_cast<TabFilament*>(wxGetApp().get_tab(Preset::TYPE_FILAMENT)); tab != nullptr) {
+        const int active_extruder = tab->get_active_extruder();
+        if (active_extruder >= 0 && size_t(active_extruder) < cnt &&
+            preset_bundle.extruders_filaments[active_extruder].get_selected_preset_name() != filaments[active_extruder]) {
+            tab->invalidate_active_extruder();
+            tab->load_current_preset();
+        }
+    }
+
+    // Extruders referenced by the print settings.
+    if (Tab *tab = wxGetApp().get_tab(Preset::TYPE_PRINT); tab != nullptr) {
+        DynamicPrintConfig new_config = *tab->get_config();
+        bool               changed    = false;
+        for (const char *key : { "perimeter_extruder", "infill_extruder", "solid_infill_extruder", "support_material_extruder",
+                                 "support_material_interface_extruder", "wipe_tower_extruder", "bed_temperature_extruder" })
+            if (new_config.has(key)) {
+                const int old_extruder = new_config.opt_int(key);
+                if (const int new_extruder = moved_to(old_extruder); new_extruder != old_extruder) {
+                    new_config.set_key_value(key, new ConfigOptionInt(new_extruder));
+                    changed = true;
+                }
+            }
+        if (changed)
+            tab->load_config(new_config);
+    }
+
+    // Extruder colors override the filament colors, so they have to follow the filaments.
+    if (Tab *tab = wxGetApp().get_tab(Preset::TYPE_PRINTER); tab != nullptr) {
+        DynamicPrintConfig new_config = *tab->get_config();
+        if (auto *colors = new_config.option<ConfigOptionStrings>("extruder_colour"); colors != nullptr && colors->values.size() == cnt) {
+            const std::vector<std::string> old_colors = colors->values;
+            for (size_t i = 0; i < cnt; ++i)
+                colors->values[i] = old_colors[source[i]];
+            if (colors->values != old_colors)
+                tab->load_config(new_config);
+        }
+    }
+
+    // Purging volumes.
+    if (auto *matrix = preset_bundle.project_config.option<ConfigOptionFloats>("wiping_volumes_matrix");
+        matrix != nullptr && matrix->values.size() == cnt * cnt) {
+        const std::vector<double> old_values = matrix->values;
+        for (size_t i = 0; i < cnt; ++i)
+            for (size_t j = 0; j < cnt; ++j)
+                matrix->values[i * cnt + j] = old_values[source[i] * cnt + source[j]];
+    }
+
+    // Synchronize config.ini with the current selections.
+    preset_bundle.export_selections(*wxGetApp().app_config);
+}
+
+void Sidebar::swap_extruders(size_t extruder_a, size_t extruder_b)
+{
+    const size_t extruders_cnt = wxGetApp().preset_bundle->extruders_filaments.size();
+    if (extruder_a == extruder_b || std::max(extruder_a, extruder_b) >= extruders_cnt)
+        return;
+
+    GLCanvas3D *canvas = m_plater->canvas3D();
+    if (canvas != nullptr)
+        canvas->reset_all_gizmos();
+
+    m_plater->take_snapshot(format_wxstr(_L("Swap extruders %1% and %2%"), extruder_a + 1, extruder_b + 1));
+
+    std::vector<size_t> source(extruders_cnt);
+    std::iota(source.begin(), source.end(), size_t(0));
+    std::swap(source[extruder_a], source[extruder_b]);
+    permute_extruders_in_presets(source);
+
+    m_plater->model().swap_extruders(static_cast<unsigned int>(extruder_a + 1), static_cast<unsigned int>(extruder_b + 1));
+
+    update_all_filament_comboboxes();
+    m_plater->on_config_change(wxGetApp().preset_bundle->full_config());
+    m_plater->force_filament_colors_update();
+    m_object_list->update_after_undo_redo();
+    m_plater->update_project_dirty_from_presets();
+    if (canvas != nullptr)
+        canvas->reload_scene(true);
+    m_plater->schedule_background_process();
+}
+
+void Sidebar::update_extruders_after_undo_redo(const std::vector<unsigned int> &old_permutation)
+{
+    const std::vector<unsigned int> &new_permutation = m_plater->model().extruder_permutation;
+    if (old_permutation == new_permutation || wxGetApp().preset_bundle->printers.get_edited_preset().printer_technology() != ptFFF)
+        return;
+
+    // Extruders, which were never swapped, are not stored in the permutation.
+    auto original_extruder = [](const std::vector<unsigned int> &permutation, size_t idx) {
+        return idx < permutation.size() ? size_t(permutation[idx]) : idx;
+    };
+
+    // The extruder i shall take over the data of the extruder source[i].
+    const size_t        extruders_cnt = wxGetApp().preset_bundle->extruders_filaments.size();
+    std::vector<size_t> source(extruders_cnt);
+    bool                changed = false;
+    for (size_t i = 0; i < extruders_cnt; ++i) {
+        size_t j = 0;
+        while (j < extruders_cnt && original_extruder(old_permutation, j) != original_extruder(new_permutation, i))
+            ++j;
+        if (j == extruders_cnt)
+            // The number of extruders was reduced since the swap, the extruders can not be moved back.
+            return;
+        source[i] = j;
+        changed |= i != j;
+    }
+    if (!changed)
+        return;
+
+    permute_extruders_in_presets(source);
+
+    std::map<unsigned int, unsigned int> remap;
+    for (size_t i = 0; i < extruders_cnt; ++i)
+        if (source[i] != i)
+            remap[static_cast<unsigned int>(source[i] + 1)] = static_cast<unsigned int>(i + 1);
+    m_plater->model().remap_extruders_outside_snapshots(remap);
+
+    update_all_filament_comboboxes();
+    m_plater->on_config_change(wxGetApp().preset_bundle->full_config());
+    m_plater->force_filament_colors_update();
+    m_object_list->update_extruder_colors();
+    m_plater->update_project_dirty_from_presets();
+    if (GLCanvas3D *canvas = m_plater->canvas3D(); canvas != nullptr)
+        canvas->reload_scene(true);
+    m_plater->schedule_background_process();
+}
+
 void Sidebar::set_extruders_count(size_t extruders_count)
 {
     if (extruders_count == m_combos_filament.size())
@@ -1632,6 +1844,7 @@ void Sidebar::set_extruders_count(size_t extruders_count)
 
     // remove unused choices if any
     remove_unused_filament_combos(extruders_count);
+    update_filament_badges_visibility();
 
     if (m_btn_full_spectrum && m_presets_sizer) {
         m_presets_sizer->Show(size_t(4), int(extruders_count) >= 2);

@@ -423,6 +423,77 @@ bool Model::is_mm_painted() const
     return std::any_of(this->objects.cbegin(), this->objects.cend(), [](const ModelObject *mo) { return mo->is_mm_painted(); });
 }
 
+void Model::swap_extruders(unsigned int extruder_a, unsigned int extruder_b)
+{
+    if (extruder_a == extruder_b || extruder_a == 0 || extruder_b == 0)
+        return;
+
+    auto swapped = [extruder_a, extruder_b](unsigned int extruder) {
+        return extruder == extruder_a ? extruder_b : extruder == extruder_b ? extruder_a : extruder;
+    };
+
+    // Zero stands for the default extruder, thus it is never swapped.
+    auto swap_in_config = [&swapped](ModelConfig &config) {
+        for (const char *key : { "extruder", "perimeter_extruder", "infill_extruder", "solid_infill_extruder",
+                                 "support_material_extruder", "support_material_interface_extruder" })
+            if (config.has(key)) {
+                const int old_extruder = config.opt_int(key);
+                if (const int new_extruder = old_extruder > 0 ? int(swapped(old_extruder)) : old_extruder; new_extruder != old_extruder)
+                    config.set_key_value(key, new ConfigOptionInt(new_extruder));
+            }
+    };
+
+    const std::map<TriangleStateType, TriangleStateType> state_remap = {
+        { TriangleStateType(extruder_a), TriangleStateType(extruder_b) },
+        { TriangleStateType(extruder_b), TriangleStateType(extruder_a) }
+    };
+
+    for (ModelObject *object : this->objects) {
+        swap_in_config(object->config);
+        for (auto &[range, config] : object->layer_config_ranges)
+            swap_in_config(config);
+        for (ModelVolume *volume : object->volumes) {
+            swap_in_config(volume->config);
+            if (volume->is_mm_painted()) {
+                const std::vector<bool> &used = volume->mm_segmentation_facets.get_data().used_states;
+                if ((extruder_a < used.size() && used[extruder_a]) || (extruder_b < used.size() && used[extruder_b])) {
+                    TriangleSelector selector(volume->mesh());
+                    selector.deserialize(volume->mm_segmentation_facets.get_data(), false);
+                    selector.remap_states(state_remap);
+                    volume->mm_segmentation_facets.set(selector);
+                }
+            }
+        }
+    }
+
+    this->remap_extruders_outside_snapshots({ { extruder_a, extruder_b }, { extruder_b, extruder_a } });
+
+    while (this->extruder_permutation.size() < std::max(extruder_a, extruder_b))
+        this->extruder_permutation.emplace_back(static_cast<unsigned int>(this->extruder_permutation.size()));
+    std::swap(this->extruder_permutation[extruder_a - 1], this->extruder_permutation[extruder_b - 1]);
+}
+
+void Model::remap_extruders_outside_snapshots(const std::map<unsigned int, unsigned int> &remap)
+{
+    auto remapped = [&remap](unsigned int extruder) {
+        const auto it = remap.find(extruder);
+        return it != remap.end() ? it->second : extruder;
+    };
+
+    for (CustomGCode::Info &info : this->custom_gcode_per_print_z_vector)
+        for (CustomGCode::Item &item : info.gcodes)
+            if ((item.type == CustomGCode::ToolChange || item.type == CustomGCode::ColorChange) && item.extruder > 0)
+                item.extruder = int(remapped(item.extruder));
+
+    for (FullSpectrum::VirtualExtruder &virtual_extruder : this->virtual_extruders) {
+        for (FullSpectrum::VirtualExtruderComponent &component : virtual_extruder.components)
+            component.extruder_id = remapped(component.extruder_id);
+        if (virtual_extruder.gradient.has_value())
+            for (FullSpectrum::VirtualExtruderGradientStop &stop : virtual_extruder.gradient->stops)
+                stop.extruder_id = remapped(stop.extruder_id);
+    }
+}
+
 bool Model::is_fuzzy_skin_painted() const
 {
     return std::any_of(this->objects.cbegin(), this->objects.cend(), [](const ModelObject *mo) { return mo->is_fuzzy_skin_painted(); });

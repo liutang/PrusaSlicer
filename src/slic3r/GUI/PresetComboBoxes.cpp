@@ -895,6 +895,18 @@ void PlaterPresetComboBox::show_edit_menu()
         append_menu_item(menu, wxID_ANY, _L("Change extruder color"), "",
             [this](wxCommandEvent&) { this->change_extruder_color(); }, "funnel", menu, []() { return true; }, wxGetApp().plater());
 #endif //__linux__
+        if (const size_t extruders_cnt = m_preset_bundle->extruders_filaments.size(); extruders_cnt > 1) {
+            const std::vector<wxBitmapBundle*> icons = get_extruder_color_icons(true);
+            wxMenu* swap_menu = new wxMenu();
+            for (size_t idx = 0; idx < extruders_cnt; ++idx) {
+                if (int(idx) == m_extruder_idx)
+                    continue;
+                append_menu_item(swap_menu, wxID_ANY, format_wxstr("%1% %2%", _L("Extruder"), idx + 1), "",
+                    [this, idx](wxCommandEvent&) { wxGetApp().sidebar().swap_extruders(size_t(m_extruder_idx), idx); },
+                    idx < icons.size() ? icons[idx] : nullptr, menu, []() { return true; }, wxGetApp().plater());
+            }
+            append_submenu(menu, swap_menu, wxID_ANY, _L("Swap with extruder"), "", "funnel", []() { return true; }, wxGetApp().plater());
+        }
         append_menu_item(menu, wxID_ANY, _L("Show/Hide template presets"), "",
             [](wxCommandEvent&) { wxGetApp().open_preferences("no_templates", "General"); }, "spool", menu, []() { return true; }, wxGetApp().plater());
 
