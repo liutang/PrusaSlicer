@@ -1262,6 +1262,11 @@ public:
     ModelObjectPtrs     objects;
     // Virtual extruder definitions. Empty when no virtual extruders are defined.
     FullSpectrum::VirtualExtruders virtual_extruders;
+    // Order of the extruders produced by swap_extruders(): extruder_permutation[i] is the original 0-based index of the extruder
+    // currently placed at the position i. A missing item stands for an extruder, which was not moved.
+    // Stored with the Undo / Redo snapshots, so that the data kept outside of the snapshots (presets, custom G-codes,
+    // virtual extruders) may follow the Undo / Redo jumps.
+    std::vector<unsigned int> extruder_permutation;
 
     ModelWipeTower& wipe_tower();
     const ModelWipeTower& wipe_tower() const;
@@ -1356,6 +1361,13 @@ public:
     // Checks if any of objects is painted using the fuzzy skin painting gizmo.
     bool          is_fuzzy_skin_painted() const;
 
+    // Exchange all references to the two 1-based extruder IDs: object, volume and layer range settings,
+    // multi-material painting, custom tool / color changes and virtual extruder components.
+    void          swap_extruders(unsigned int extruder_a, unsigned int extruder_b);
+    // Remap the 1-based extruder IDs of the data, which is not stored with the Undo / Redo snapshots
+    // (custom tool / color changes and virtual extruder components).
+    void          remap_extruders_outside_snapshots(const std::map<unsigned int, unsigned int> &remap);
+
     size_t        minimum_required_painting_version(FacetsAnnotation ModelVolume::*facets_annotation_member) const;
 
 private:
@@ -1366,7 +1378,7 @@ private:
 	friend class cereal::access;
 	friend class UndoRedo::StackImpl;
 	template<class Archive> void serialize(Archive &ar) {
-		ar(materials, objects, wipe_tower_vector);
+		ar(materials, objects, wipe_tower_vector, extruder_permutation);
     }
 };
 

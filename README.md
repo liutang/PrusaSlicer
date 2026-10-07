@@ -1,6 +1,35 @@
 
 ![PrusaSlicer logo](/resources/icons/PrusaSlicer.png?raw=true)
 
+## Swap toolheads
+
+A multi-material project assigns each filament to a specific toolhead, and that assignment often does not match the order in which filaments are loaded on your printer. Swapping two toolheads exchanges their filaments and updates everything in the project that refers to them, so the project matches the printer and can be printed without remapping filaments at the printer.
+
+Click the gear button next to a filament in the sidebar and choose **Swap with extruder**, then pick the other extruder.
+
+![Swap with extruder menu on a filament in the sidebar](/doc/images/toolhead-remap/swap-with-extruder.png?raw=true)
+
+A swap moves all of the following together, so the print comes out the same, only from different toolheads:
+
+* the filament presets of the two extruders, with all their filament settings and colors
+* the extruder colors set in the printer settings, if they differ
+* extruder assignments of objects, parts, modifiers and layer ranges
+* multi-material painting
+* tool changes and color changes placed on the layer slider
+* purging volumes
+* virtual extruder (color mixing) components
+* extruder numbers in the print settings, such as the support or wipe tower extruder
+
+Nozzle diameter, extruder offsets and retraction settings stay with the physical toolhead and are not swapped.
+
+Undo and redo work across a swap: the filaments move back and forth together with the objects.
+
+Because a swap may change extruder numbers in the print settings and extruder colors in the printer settings, those presets may show as modified afterwards.
+
+## Extruder numbers in the sidebar
+
+On a multi-extruder printer, each filament selector in the sidebar has a numbered cell on its left, so you can tell which extruder is which at a glance. The numbers belong to the extruder positions and stay in place when filaments are swapped.
+
 # PrusaSlicer
 
 You may want to check the [PrusaSlicer project page](https://www.prusa3d.com/prusaslicer/).
