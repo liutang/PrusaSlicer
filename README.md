@@ -9,7 +9,7 @@ PrusaSlicer 2.9.6 is the last release of the 2.x line. Prusa has moved its devel
 
 * improvements for multi-toolhead printing, especially the 8-toolhead INDX
 * selected improvements ported from [OrcaSlicer](https://github.com/OrcaSlicer/OrcaSlicer) where they are needed
-* no changes to file formats or settings, so projects and profiles stay compatible with PrusaSlicer 2.9.6
+* no changes to file formats, so projects and profiles still open in PrusaSlicer 2.9.6; a setting that only exists here, such as the Cross Hatch fill pattern, falls back to its default there
 
 The application identifies itself as version `2.9.6-extended` in the title bar, the splash screen, About and System Info. Project files, G-code and configuration still carry the plain `2.9.6` version.
 
@@ -21,7 +21,8 @@ This is not an official Prusa Research release.
 |---|---|
 | [Swap toolheads](#swap-toolheads) | Exchange two toolheads, with their filaments and everything in the project that refers to them. |
 | [Extruder numbers in the sidebar](#extruder-numbers-in-the-sidebar) | Number each filament selector so you can tell the extruders apart. |
-| [Base layer under the support interface](#base-layer-under-the-support-interface) | Print one dense layer of support base material under an interface made of a different material. |
+| [Base layers at the support interface](#base-layers-at-the-support-interface) | Print a dense layer of support base material next to an interface made of a different material. |
+| [Cross Hatch infill](#cross-hatch-infill) | A sparse fill pattern of straight lines that change direction every few layers, ported from OrcaSlicer. |
 
 ### Swap toolheads
 
@@ -37,11 +38,19 @@ The filament presets and colors move together with the object and part assignmen
 
 On a multi-extruder printer, each filament selector in the sidebar has a numbered cell on its left, so you can tell which extruder is which at a glance. The numbers belong to the extruder positions and stay in place when filaments are swapped.
 
-### Base layer under the support interface
+### Base layers at the support interface
 
-When the support interface is printed with a different extruder than the support base, for example a PLA interface on PETG supports, one dense layer of the base material is printed directly under the interface layers. The interface material then lies on a continuous surface and does not have to bridge the gaps of the sparse support base.
+When the support interface is printed with a different extruder than the support base, for example a PETG interface on PLA supports, one dense layer of the base material is printed directly under the top interface layers. The interface material then lies on a continuous surface and does not have to bridge the gaps of the sparse support base.
 
-The layer is added to the configured number of top interface layers, it does not replace one of them. It applies to the Grid, Snug and Organic support styles. Supports printed with a single extruder and soluble interfaces are not changed. The behavior is adapted from OrcaSlicer.
+Where Grid and Snug supports rest on the model, a matching dense layer of the base material is printed directly above the bottom interface layers.
+
+These layers are added to the configured number of interface layers, they do not replace any of them. The layer under the top interface applies to the Grid, Snug and Organic support styles. Supports printed with a single extruder and soluble interfaces are not changed. The behavior is adapted from OrcaSlicer.
+
+### Cross Hatch infill
+
+Cross Hatch is a sparse fill pattern ported from OrcaSlicer. It prints straight parallel lines for a number of layers, then turns them by 90 degrees, with a few transition layers in between that tie the two directions together. Lines never cross within a layer, which makes the infill fast and quiet to print.
+
+Select it in Print Settings under Infill, Fill pattern. It is available for sparse infill only. OrcaSlicer's corner smoothing and infill line multiplier are not part of the port.
 
 # PrusaSlicer
 
