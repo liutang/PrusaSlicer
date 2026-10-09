@@ -430,7 +430,7 @@ MsgDataIncompatible::MsgDataIncompatible(const std::unordered_map<std::string, w
 	text->Wrap(CONTENT_WIDTH * wxGetApp().em_unit());
 	content_sizer->Add(text);
 
-	auto *text2 = new wxStaticText(this, wxID_ANY, wxString::Format(_(L("This %s version: %s")), SLIC3R_APP_NAME, SLIC3R_VERSION));
+	auto *text2 = new wxStaticText(this, wxID_ANY, wxString::Format(_(L("This %s version: %s")), SLIC3R_APP_NAME, SLIC3R_VERSION_DISPLAY));
 	text2->Wrap(CONTENT_WIDTH * wxGetApp().em_unit());
 	content_sizer->Add(text2);
 	content_sizer->AddSpacer(VERT_SPACING);

@@ -14,6 +14,42 @@
 
 namespace Slic3r::FFFSupport {
 
+// Is the support base printed with the same extruder as the support interface?
+static bool same_extruder_for_base_and_interface(const PrintObject &object)
+{
+    const PrintObjectConfig &object_config = object.config();
+    if (object_config.support_material_extruder.value == object_config.support_material_interface_extruder.value)
+        return true;
+    if (object_config.support_material_extruder.value == 0 || object_config.support_material_interface_extruder.value == 0) {
+        // One of the support extruders is of "don't care" type.
+        auto object_extruders = object.object_extruders();
+        if (object_extruders.size() == 1 &&
+            *object_extruders.begin() == std::max<unsigned int>(object_config.support_material_extruder.value, object_config.support_material_interface_extruder.value))
+            // Object is printed with the same extruder as the support.
+            return true;
+    }
+    return false;
+}
+
+static bool is_soluble_interface_non_soluble_base(const PrintObject &object)
+{
+    const PrintConfig       &print_config  = object.print()->config();
+    const PrintObjectConfig &object_config = object.config();
+    return
+        // Zero z-gap between the overhangs and the support interface.
+        object.slicing_parameters().soluble_interface &&
+        // Interface extruder soluble.
+        object_config.support_material_interface_extruder.value > 0 && print_config.filament_soluble.get_at(object_config.support_material_interface_extruder.value - 1) &&
+        // Base extruder: Either "print with active extruder" not soluble.
+        (object_config.support_material_extruder.value == 0 || ! print_config.filament_soluble.get_at(object_config.support_material_extruder.value - 1));
+}
+
+bool SupportParameters::additional_base_interface_layer(const PrintObject &object)
+{
+    return object.config().support_material_interface_layers.value > 0 &&
+        ! is_soluble_interface_non_soluble_base(object) && ! same_extruder_for_base_and_interface(object);
+}
+
 SupportParameters::SupportParameters(const PrintObject &object)
 {
     const PrintConfig       &print_config   = object.print()->config();
@@ -21,13 +57,7 @@ SupportParameters::SupportParameters(const PrintObject &object)
     const SlicingParameters &slicing_params = object.slicing_parameters();
 
     this->soluble_interface = slicing_params.soluble_interface;
-    this->soluble_interface_non_soluble_base =
-        // Zero z-gap between the overhangs and the support interface.
-        slicing_params.soluble_interface &&
-        // Interface extruder soluble.
-        object_config.support_material_interface_extruder.value > 0 && print_config.filament_soluble.get_at(object_config.support_material_interface_extruder.value - 1) &&
-        // Base extruder: Either "print with active extruder" not soluble.
-        (object_config.support_material_extruder.value == 0 || ! print_config.filament_soluble.get_at(object_config.support_material_extruder.value - 1));
+    this->soluble_interface_non_soluble_base = is_soluble_interface_non_soluble_base(object);
 
     {
         int num_top_interface_layers    = std::max(0, object_config.support_material_interface_layers.value);
@@ -41,6 +71,16 @@ SupportParameters::SupportParameters(const PrintObject &object)
             // Try to support soluble dense interfaces with non-soluble dense interfaces.
             this->num_top_base_interface_layers    = size_t(std::min(num_top_interface_layers / 2, 2));
             this->num_bottom_base_interface_layers = size_t(std::min(num_bottom_interface_layers / 2, 2));
+        } else if (additional_base_interface_layer(object)) {
+            // Support the interface with one dense layer printed with the support base extruder.
+            // Extend the interface slab by one layer, the layer of the slab farthest from the object will be the base interface layer.
+            ++ this->num_top_interface_layers;
+            this->num_top_base_interface_layers    = 1;
+            if (this->has_bottom_contacts) {
+                ++ this->num_bottom_interface_layers;
+                this->num_bottom_base_interface_layers = 1;
+            } else
+                this->num_bottom_base_interface_layers = 0;
         } else {
             this->num_top_base_interface_layers    = 0;
             this->num_bottom_base_interface_layers = 0;
@@ -80,15 +120,7 @@ SupportParameters::SupportParameters(const PrintObject &object)
         this->support_material_interface_flow.with_flow_ratio(bridge_flow_ratio) :
         Flow::bridging_flow(bridge_flow_ratio * this->support_material_interface_flow.nozzle_diameter(), this->support_material_interface_flow.nozzle_diameter());
 
-    this->can_merge_support_regions = object_config.support_material_extruder.value == object_config.support_material_interface_extruder.value;
-    if (!this->can_merge_support_regions && (object_config.support_material_extruder.value == 0 || object_config.support_material_interface_extruder.value == 0)) {
-        // One of the support extruders is of "don't care" type.
-        auto object_extruders = object.object_extruders();
-        if (object_extruders.size() == 1 &&
-            *object_extruders.begin() == std::max<unsigned int>(object_config.support_material_extruder.value, object_config.support_material_interface_extruder.value))
-            // Object is printed with the same extruder as the support.
-            this->can_merge_support_regions = true;
-    }
+    this->can_merge_support_regions = same_extruder_for_base_and_interface(object);
 
     double interface_spacing = object_config.support_material_interface_spacing.value + this->support_material_interface_flow.spacing();
     this->interface_density  = std::min(1., this->support_material_interface_flow.spacing() / interface_spacing);

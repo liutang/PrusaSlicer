@@ -4,6 +4,9 @@
 set(SLIC3R_APP_NAME "PrusaSlicer")
 set(SLIC3R_APP_KEY "PrusaSlicer")
 set(SLIC3R_VERSION "2.9.6")
-set(SLIC3R_BUILD_ID "PrusaSlicer-${SLIC3R_VERSION}+UNKNOWN")
+# Version shown to the user (title bar, splash screen, About, System Info).
+# Anything affecting the operation (configuration, file formats, update checks) uses SLIC3R_VERSION.
+set(SLIC3R_VERSION_DISPLAY "${SLIC3R_VERSION}-extended")
+set(SLIC3R_BUILD_ID "PrusaSlicer-${SLIC3R_VERSION_DISPLAY}")
 set(SLIC3R_RC_VERSION "2,9,6,0")
 set(SLIC3R_RC_VERSION_DOTS "2.9.6.0")

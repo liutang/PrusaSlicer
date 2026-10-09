@@ -1,34 +1,47 @@
 
 ![PrusaSlicer logo](/resources/icons/PrusaSlicer.png?raw=true)
 
-## Swap toolheads
+# PrusaSlicer 2.9.6 Extended
+
+PrusaSlicer 2.9.6 Extended is a community fork of PrusaSlicer 2.9.6 that adds quality of life improvements to the stable 2.x release, with a focus on multi-color and multi-material printing on the Bondtech INDX.
+
+PrusaSlicer 2.9.6 is the last release of the 2.x line. Prusa has moved its development to PrusaSlicer 3.x, which is not ready yet. Until it is, this fork keeps 2.9.6 as the base and builds on it:
+
+* improvements for multi-toolhead printing, especially the 8-toolhead INDX
+* selected improvements ported from [OrcaSlicer](https://github.com/OrcaSlicer/OrcaSlicer) where they are needed
+* no changes to file formats or settings, so projects and profiles stay compatible with PrusaSlicer 2.9.6
+
+The application identifies itself as version `2.9.6-extended` in the title bar, the splash screen, About and System Info. Project files, G-code and configuration still carry the plain `2.9.6` version.
+
+This is not an official Prusa Research release.
+
+## Enhancements
+
+| Enhancement | What it does |
+|---|---|
+| [Swap toolheads](#swap-toolheads) | Exchange two toolheads, with their filaments and everything in the project that refers to them. |
+| [Extruder numbers in the sidebar](#extruder-numbers-in-the-sidebar) | Number each filament selector so you can tell the extruders apart. |
+| [Base layer under the support interface](#base-layer-under-the-support-interface) | Print one dense layer of support base material under an interface made of a different material. |
+
+### Swap toolheads
 
 A multi-material project assigns each filament to a specific toolhead, and that assignment often does not match the order in which filaments are loaded on your printer. Swapping two toolheads exchanges their filaments and updates everything in the project that refers to them, so the project matches the printer and can be printed without remapping filaments at the printer.
 
 Click the gear button next to a filament in the sidebar and choose **Swap with extruder**, then pick the other extruder.
 
-![Swap with extruder menu on a filament in the sidebar](/doc/images/toolhead-remap/swap-with-extruder.png?raw=true)
+<img src="/doc/images/toolhead-remap/swap-with-extruder.png?raw=true" alt="Swap with extruder menu on a filament in the sidebar" width="418">
 
-A swap moves all of the following together, so the print comes out the same, only from different toolheads:
+The filament presets and colors move together with the object and part assignments, multi-material painting, tool and color changes on the layer slider, purging volumes and the extruder numbers in the print settings. Nozzle diameter, extruder offsets and retraction settings stay with the physical toolhead. Undo and redo work across a swap.
 
-* the filament presets of the two extruders, with all their filament settings and colors
-* the extruder colors set in the printer settings, if they differ
-* extruder assignments of objects, parts, modifiers and layer ranges
-* multi-material painting
-* tool changes and color changes placed on the layer slider
-* purging volumes
-* virtual extruder (color mixing) components
-* extruder numbers in the print settings, such as the support or wipe tower extruder
-
-Nozzle diameter, extruder offsets and retraction settings stay with the physical toolhead and are not swapped.
-
-Undo and redo work across a swap: the filaments move back and forth together with the objects.
-
-Because a swap may change extruder numbers in the print settings and extruder colors in the printer settings, those presets may show as modified afterwards.
-
-## Extruder numbers in the sidebar
+### Extruder numbers in the sidebar
 
 On a multi-extruder printer, each filament selector in the sidebar has a numbered cell on its left, so you can tell which extruder is which at a glance. The numbers belong to the extruder positions and stay in place when filaments are swapped.
+
+### Base layer under the support interface
+
+When the support interface is printed with a different extruder than the support base, for example a PLA interface on PETG supports, one dense layer of the base material is printed directly under the interface layers. The interface material then lies on a continuous surface and does not have to bridge the gaps of the sparse support base.
+
+The layer is added to the configured number of top interface layers, it does not replace one of them. It applies to the Grid, Snug and Organic support styles. Supports printed with a single extruder and soluble interfaces are not changed. The behavior is adapted from OrcaSlicer.
 
 # PrusaSlicer
 

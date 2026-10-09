@@ -299,7 +299,7 @@ private:
             title = wxGetApp().is_editor() ? SLIC3R_APP_NAME : GCODEVIEWER_APP_NAME;
 
             // dynamically get the version to display
-            version = _L("Version") + " " + std::string(SLIC3R_VERSION);
+            version = _L("Version") + " " + std::string(SLIC3R_VERSION_DISPLAY);
 
             // credits infornation
             credits = "\n" + title + " " +
@@ -1157,7 +1157,7 @@ std::string GUI_App::check_older_app_config(Semver current_version, bool backup)
     BOOST_LOG_TRIVIAL(info) << "last app config file used: " << older_data_dir_path;
     // ask about using older data folder
     InfoDialog msg(nullptr
-        , format_wxstr(_L("You are opening %1% version %2%."), SLIC3R_APP_NAME, SLIC3R_VERSION)
+        , format_wxstr(_L("You are opening %1% version %2%."), SLIC3R_APP_NAME, SLIC3R_VERSION_DISPLAY)
         , backup ? 
         format_wxstr(_L(
             "The active configuration was created by <b>%1% %2%</b>,"
@@ -3420,12 +3420,12 @@ void GUI_App::show_desktop_integration_dialog()
 void GUI_App::show_downloader_registration_dialog()
 {
     InfoDialog msg(nullptr
-        , format_wxstr(_L("Welcome to %1% version %2%."), SLIC3R_APP_NAME, SLIC3R_VERSION)
+        , format_wxstr(_L("Welcome to %1% version %2%."), SLIC3R_APP_NAME, SLIC3R_VERSION_DISPLAY)
         , format_wxstr(_L(
             "Do you wish to register downloads from supported websites"
             "\nfor this <b>%1% %2%</b> executable?"
             "\n\nDownloads can be registered for only 1 executable at a time."
-            ), SLIC3R_APP_NAME, SLIC3R_VERSION)
+            ), SLIC3R_APP_NAME, SLIC3R_VERSION_DISPLAY)
         , true, wxYES_NO);
     if (msg.ShowModal() == wxID_YES) {
         auto downloader_worker = new DownloaderUtils::Worker(nullptr);
