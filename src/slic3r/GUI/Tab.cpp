@@ -1079,6 +1079,117 @@ static wxString pad_combo_value_for_config(const DynamicPrintConfig &config)
     return config.opt_bool("pad_enable") ? (config.opt_bool("pad_around_object") ? _("Around object") : _("Below object")) : _("None");
 }
 
+// Suggest the recommended support interface settings after the support interface extruder was changed to a material,
+// which does not bond to the model (PETG on PLA, PLA on PETG or flexible materials), or to a soluble material
+// over a non-soluble support base. Ported from OrcaSlicer.
+static void suggest_support_interface_settings(Tab *tab)
+{
+    const DynamicPrintConfig &config = *tab->get_config();
+    const int interface_extruder = config.opt_int("support_material_interface_extruder") - 1;
+    const int base_extruder      = config.opt_int("support_material_extruder") - 1;
+    if (interface_extruder < 0)
+        // The interface is printed with the current extruder.
+        return;
+
+    const DynamicPrintConfig  full_config      = wxGetApp().preset_bundle->full_config();
+    const ConfigOptionStrings *filament_types  = full_config.option<ConfigOptionStrings>("filament_type");
+    const ConfigOptionBools   *filament_soluble = full_config.option<ConfigOptionBools>("filament_soluble");
+    if (filament_types == nullptr || filament_soluble == nullptr || interface_extruder >= int(filament_types->values.size()))
+        return;
+
+    auto is_soluble = [filament_soluble](int extruder) {
+        return extruder >= 0 && extruder < int(filament_soluble->values.size()) && filament_soluble->values[extruder] != 0;
+    };
+    auto is_pla      = [](const std::string &type) { return type == "PLA"; };
+    auto is_petg     = [](const std::string &type) { return type == "PETG" || type == "PET"; };
+    auto is_flexible = [](const std::string &type) { return type == "FLEX" || type == "TPU"; };
+
+    // Material types of the filaments the models are printed with.
+    bool model_has_pla = false, model_has_petg = false, model_has_flexible = false;
+    std::set<size_t> model_extruders;
+    auto add_model_extruder = [&](size_t extruder) {
+        if (extruder < filament_types->values.size()) {
+            model_extruders.insert(extruder);
+            const std::string &type = filament_types->values[extruder];
+            model_has_pla      |= is_pla(type);
+            model_has_petg     |= is_petg(type);
+            model_has_flexible |= is_flexible(type);
+        }
+    };
+    for (const ModelObject *object : wxGetApp().plater()->model().objects)
+        for (const ModelVolume *volume : object->volumes)
+            if (volume->is_model_part()) {
+                // Zero stands for the default extruder, which is the first one.
+                add_model_extruder(size_t(std::max(volume->extruder_id(), 1) - 1));
+                for (size_t extruder : volume->get_extruders_from_multi_material_painting())
+                    add_model_extruder(extruder);
+            }
+
+    const std::string &interface_type = filament_types->values[interface_extruder];
+    const bool non_bonding_interface =
+        (is_petg(interface_type) && model_has_pla) || (is_pla(interface_type) && (model_has_petg || model_has_flexible));
+    const bool soluble_over_non_soluble = is_soluble(interface_extruder) && ! is_soluble(base_extruder);
+
+    // With zero contact distance, the automatic interface pattern would be concentric.
+    const bool already_set =
+        config.opt_float("support_material_contact_distance") == 0 && config.opt_float("support_material_interface_spacing") == 0 &&
+        config.opt_enum<SupportMaterialInterfacePattern>("support_material_interface_pattern") == smipRectilinear;
+
+    // The bed temperature should follow the model, not the support interface. If the bed temperatures of the model filaments
+    // differ as well, there is no single right extruder to take the bed temperature from, so it is left to the user.
+    const ConfigOptionInts *bed_temperatures             = full_config.option<ConfigOptionInts>("bed_temperature");
+    const ConfigOptionInts *first_layer_bed_temperatures = full_config.option<ConfigOptionInts>("first_layer_bed_temperature");
+    auto bed_temperatures_differ = [bed_temperatures, first_layer_bed_temperatures](size_t a, size_t b) {
+        // The same threshold as used by Print::validate().
+        return bed_temperatures != nullptr && first_layer_bed_temperatures != nullptr &&
+            (std::abs(bed_temperatures->get_at(a) - bed_temperatures->get_at(b)) > 15 ||
+             std::abs(first_layer_bed_temperatures->get_at(a) - first_layer_bed_temperatures->get_at(b)) > 15);
+    };
+    bool interface_bed_temperature_differs = false;
+    bool model_bed_temperatures_differ     = false;
+    for (size_t a : model_extruders) {
+        interface_bed_temperature_differs |= bed_temperatures_differ(size_t(interface_extruder), a);
+        for (size_t b : model_extruders)
+            model_bed_temperatures_differ |= bed_temperatures_differ(a, b);
+    }
+    const bool bed_temperature_undecided = config.has("bed_temperature_extruder") && config.opt_int("bed_temperature_extruder") == 0 &&
+        interface_bed_temperature_differs;
+    const bool set_bed_temperature_extruder = bed_temperature_undecided && ! model_bed_temperatures_differ;
+
+    if (! soluble_over_non_soluble && ! (non_bonding_interface && (! already_set || set_bed_temperature_extruder)))
+        return;
+
+    wxString msg_text = is_soluble(interface_extruder) ?
+        _L("When using soluble material for the support interface, we recommend the following settings:\n"
+           "0 top contact Z distance, 0 interface pattern spacing, rectilinear interface pattern, "
+           "support layers synchronized with the object layers and soluble materials for both the support interface and the support base.") :
+        _L("When using a different material for the support interface, we recommend the following settings:\n"
+           "0 top contact Z distance, 0 interface pattern spacing, rectilinear interface pattern "
+           "and support layers synchronized with the object layers.");
+    if (set_bed_temperature_extruder)
+        msg_text += "\n" + format_wxstr(_L("As the bed temperatures of the used filaments differ, we also recommend to set "
+                                           "'Bed temperature by extruder' to %1%, the extruder printing the model."), *model_extruders.begin() + 1);
+    else if (bed_temperature_undecided)
+        msg_text += "\n\n" + _L("The model is printed with filaments of different bed temperatures. "
+                                 "Set 'Bed temperature by extruder' yourself, it will not be changed automatically.");
+    msg_text += "\n\n" + _L("Change these settings automatically?");
+
+    // The native message box is too narrow for this text on macOS.
+    WarningDialog dialog(wxGetApp().plater(), msg_text, _L("Suggestion"), wxYES | wxNO);
+    if (dialog.ShowModal() == wxID_YES) {
+        DynamicPrintConfig new_conf = config;
+        new_conf.set_key_value("support_material_contact_distance", new ConfigOptionFloat(0));
+        new_conf.set_key_value("support_material_interface_spacing", new ConfigOptionFloat(0));
+        new_conf.set_key_value("support_material_interface_pattern", new ConfigOptionEnum<SupportMaterialInterfacePattern>(smipRectilinear));
+        new_conf.set_key_value("support_material_synchronize_layers", new ConfigOptionBool(true));
+        if ((is_pla(interface_type) && model_has_flexible) || soluble_over_non_soluble)
+            new_conf.set_key_value("support_material_extruder", new ConfigOptionInt(interface_extruder + 1));
+        if (set_bed_temperature_extruder)
+            new_conf.set_key_value("bed_temperature_extruder", new ConfigOptionInt(int(*model_extruders.begin()) + 1));
+        tab->load_config(new_conf);
+    }
+}
+
 void Tab::on_value_change(const std::string& opt_key, const boost::any& value)
 {
     if (wxGetApp().plater() == nullptr) {
@@ -1131,6 +1242,9 @@ void Tab::on_value_change(const std::string& opt_key, const boost::any& value)
         // see https://github.com/prusa3d/PrusaSlicer/issues/7146
         return;
     }
+
+    if (is_fff && m_type == Preset::TYPE_PRINT && opt_key == "support_material_interface_extruder")
+        suggest_support_interface_settings(this);
 
     update();
 }

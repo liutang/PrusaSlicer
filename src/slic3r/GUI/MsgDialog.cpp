@@ -4,6 +4,8 @@
 ///|/
 #include "MsgDialog.hpp"
 
+#include <cmath>
+#include <wx/tokenzr.h>
 #include <wx/settings.h>
 #include <wx/sizer.h>
 #include <wx/stattext.h>
@@ -184,11 +186,25 @@ static void add_msg_content(MsgDialog* parent, wxBoxSizer* content_sizer, const 
         int page_height = std::min(int(font.GetPixelSize().y+2) * lines, 68 * em);
         page_size = wxSize(68 * em, page_height);
     }
-    else {
+    else if (content.is_monospaced_font) {
         wxClientDC dc(parent);
         wxSize msg_sz = dc.GetMultiLineTextExtent(content.msg);
         page_size = wxSize(std::min(msg_sz.GetX() + 2 * em, 68 * em),
                            std::min(msg_sz.GetY() + 2 * em, 68 * em));
+    }
+    else {
+        // Measure the text with the font used by the html window and account for the lines wrapped by the html window,
+        // otherwise the page comes out too low and a scroll bar is shown.
+        wxClientDC dc(parent);
+        dc.SetFont(font);
+        const int page_width  = std::min(dc.GetMultiLineTextExtent(content.msg).GetX() + 2 * em, 68 * em);
+        const int line_width  = std::max(page_width - 2 * em, em);
+        const int line_height = dc.GetCharHeight() + 2;
+        int       lines       = 0;
+        wxStringTokenizer tokenizer(content.msg, "\n", wxTOKEN_RET_EMPTY_ALL);
+        while (tokenizer.HasMoreTokens())
+            lines += std::max(1, int(std::ceil(double(dc.GetTextExtent(tokenizer.GetNextToken()).GetX()) / line_width)));
+        page_size = wxSize(page_width, std::min(lines * line_height + 2 * em, 68 * em));
     }
     html->SetMinSize(page_size);
 

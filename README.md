@@ -22,6 +22,8 @@ This is not an official Prusa Research release.
 | [Swap toolheads](#swap-toolheads) | Exchange two toolheads, with their filaments and everything in the project that refers to them. |
 | [Extruder numbers in the sidebar](#extruder-numbers-in-the-sidebar) | Number each filament selector so you can tell the extruders apart. |
 | [Base layers at the support interface](#base-layers-at-the-support-interface) | Print a dense layer of support base material next to an interface made of a different material. |
+| [Support interface suggestion](#support-interface-suggestion) | Offer the recommended settings when the support interface is given a material that does not bond to the model. |
+| [Support base kept out of the interface material](#support-base-kept-out-of-the-interface-material) | Stop the support base from being printed with the interface extruder when it is set to the current extruder. |
 | [Cross Hatch infill](#cross-hatch-infill) | A sparse fill pattern of straight lines that change direction every few layers, ported from OrcaSlicer. |
 
 ### Swap toolheads
@@ -45,6 +47,20 @@ When the support interface is printed with a different extruder than the support
 Where Grid and Snug supports rest on the model, a matching dense layer of the base material is printed directly above the bottom interface layers.
 
 These layers are added to the configured number of interface layers, they do not replace any of them. The layer under the top interface applies to the Grid, Snug and Organic support styles. Supports printed with a single extruder and soluble interfaces are not changed. The behavior is adapted from OrcaSlicer.
+
+### Support interface suggestion
+
+When you change the support interface extruder in Print Settings to a material that does not bond to the model, PrusaSlicer offers to apply the settings recommended for it. This happens for a PETG interface on a model that uses PLA, for a PLA interface on a model that uses PETG or a flexible filament, and for a soluble interface over a non-soluble support base.
+
+Choosing Yes sets the top contact Z distance to 0, the interface pattern spacing to 0, the interface pattern to Rectilinear and synchronizes the support layers with the object layers. For a soluble interface over a non-soluble base, and for a PLA interface on a model that uses a flexible filament, it also sets the support extruder to the interface extruder.
+
+If the bed temperatures of the interface filament and of the model differ by more than 15 °C and "Bed temperature by extruder" is 0, the suggestion also sets it to the extruder printing the model, so that the bed temperature follows the model. If the model itself is printed with filaments of different bed temperatures, the setting is left for you to choose.
+
+The suggestion is adapted from OrcaSlicer.
+
+### Support base kept out of the interface material
+
+With the support extruder set to 0 (current extruder) and a separate support interface extruder, PrusaSlicer 2.9.6 may print the support base of a whole layer with the interface material. This happens on layers where the interface extruder comes first, typically when interfaces sit at several heights. The support base is now printed with another extruder already used on that layer, so no tool change is added. Only a layer on which the interface extruder is the only one in use still prints its support base with it.
 
 ### Cross Hatch infill
 
