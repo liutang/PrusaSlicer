@@ -332,9 +332,19 @@ std::vector<SliceExtrusions> get_slices_extrusions(
 unsigned translate_support_extruder(
     const int configured_extruder,
     const LayerTools &layer_tools,
-    const ConfigOptionBools &is_soluable
+    const ConfigOptionBools &is_soluable,
+    // 1 based extruder, which shall not print the "don't care" material if another one is available. Zero if there is none.
+    const int avoided_extruder = 0
 ) {
     if (configured_extruder <= 0) {
+        if (avoided_extruder > 0) {
+            // Don't print the "don't care" support base with the support interface material,
+            // if there is another non-soluble extruder available at this layer.
+            auto it = std::find_if(layer_tools.extruders.begin(), layer_tools.extruders.end(),
+                [&is_soluable, avoided_extruder](unsigned int extruder_id) { return ! is_soluable.get_at(extruder_id) && int(extruder_id) != avoided_extruder - 1; });
+            if (it != layer_tools.extruders.end())
+                return *it;
+        }
         // Some support will be printed with "don't care" material, preferably non-soluble.
         // Is the current extruder assigned a soluble filament?
         auto it_nonsoluble = std::find_if(layer_tools.extruders.begin(), layer_tools.extruders.end(),
@@ -467,7 +477,8 @@ std::vector<NormalExtrusions> get_normal_extrusions(
             result.back().support_extrusions = get_support_extrusions(
                 extruder_id,
                 layers[instance.object_layer_to_print_id],
-                translate_support_extruder(instance.print_object.config().support_material_extruder.value, layer_tools, print.config().filament_soluble),
+                translate_support_extruder(instance.print_object.config().support_material_extruder.value, layer_tools, print.config().filament_soluble,
+                    instance.print_object.config().support_material_interface_extruder.value),
                 translate_support_extruder(instance.print_object.config().support_material_interface_extruder.value, layer_tools, print.config().filament_soluble),
                 smooth_path,
                 previous_position
