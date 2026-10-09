@@ -24,6 +24,12 @@ namespace FFFSupport {
 struct SupportParameters {
 	SupportParameters(const PrintObject &object);
 
+    // Is the support interface printed with a different extruder than the support base, while not being the case
+    // of a soluble interface over a non-soluble base? Then one dense layer is printed with the support base extruder
+    // below the top interface layers, so that the interface material does not need to bridge the sparse support base,
+    // and another one above the bottom interface layers. These layers are added to the configured number of interface layers.
+    static bool             additional_base_interface_layer(const PrintObject &object);
+
     // Both top / bottom contacts and interfaces are soluble.
     bool                    soluble_interface;
     // Support contact & interface are soluble, but support base is non-soluble.
@@ -37,9 +43,11 @@ struct SupportParameters {
     size_t                  num_top_interface_layers;
     // Number of bottom interface layers without counting the contact layer.
     size_t                  num_bottom_interface_layers;
-    // Number of top base interface layers. Zero if not soluble_interface_non_soluble_base.
+    // Number of top base interface layers. Either taken from the top interface layers if soluble_interface_non_soluble_base,
+    // or one layer added below the top interface layers if additional_base_interface_layer().
     size_t                  num_top_base_interface_layers;
-    // Number of bottom base interface layers. Zero if not soluble_interface_non_soluble_base.
+    // Number of bottom base interface layers. Either taken from the bottom interface layers if soluble_interface_non_soluble_base,
+    // or one layer added above the bottom interface layers if additional_base_interface_layer().
     size_t                  num_bottom_base_interface_layers;
 
     bool                    has_contacts() const { return this->has_top_contacts || this->has_bottom_contacts; }

@@ -64,6 +64,9 @@ TreeSupportMeshGroupSettings::TreeSupportMeshGroupSettings(const PrintObject &pr
 //    this->support_infill_angles     = 
     this->support_roof_enable       = config.support_material_interface_layers.value > 0;
     this->support_roof_layers       = this->support_roof_enable ? config.support_material_interface_layers.value : 0;
+    if (FFFSupport::SupportParameters::additional_base_interface_layer(print_object))
+        // One more roof layer, which will be printed with the support base extruder. See SupportParameters.
+        ++ this->support_roof_layers;
     this->support_floor_enable      = config.support_material_interface_layers.value > 0 && config.support_material_bottom_interface_layers.value > 0;
     this->support_floor_layers      = this->support_floor_enable ? config.support_material_bottom_interface_layers.value : 0;
 //    this->minimum_roof_area         = 
