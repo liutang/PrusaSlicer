@@ -26,6 +26,7 @@
 #include "libslic3r/libslic3r.h"
 #include "FillBase.hpp"
 #include "FillConcentric.hpp"
+#include "FillCrossHatch.hpp"
 #include "FillHoneycomb.hpp"
 #include "Fill3DHoneycomb.hpp"
 #include "FillGyroid.hpp"
@@ -68,6 +69,7 @@ Fill* Fill::new_from_type(const InfillPattern type)
     case ipLightning:           return new FillLightning::Filler();
     case ipEnsuring:            return new FillEnsuring();
     case ipZigZag:              return new FillZigZag();
+    case ipCrossHatch:          return new FillCrossHatch();
     default: throw Slic3r::InvalidArgument("unknown type");
     }
 }

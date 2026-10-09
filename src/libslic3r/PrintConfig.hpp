@@ -107,6 +107,7 @@ enum InfillPattern : int {
     ipLightning,
     ipEnsuring,
     ipZigZag,
+    ipCrossHatch,
     ipCount,
 };
 
