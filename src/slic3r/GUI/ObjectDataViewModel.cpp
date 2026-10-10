@@ -743,7 +743,9 @@ wxDataViewItem ObjectDataViewModel::Delete(const wxDataViewItem &item)
 	// NOTE: MyObjectTreeModelNodePtrArray is only an array of _pointers_
 	//       thus removing the node from it doesn't result in freeing it
 	if (node_parent) {
-        if (node->m_type & (itInstanceRoot|itLayerRoot))
+        // A root item without children is deleted as any other item. Otherwise it would never be removed
+        // and deleting of its parent object would not terminate.
+        if ((node->m_type & (itInstanceRoot|itLayerRoot)) && node->GetChildCount() > 0)
         {
             // node can be deleted by the Delete, let's check its type while we safely can
             bool is_instance_root = (node->m_type & itInstanceRoot);

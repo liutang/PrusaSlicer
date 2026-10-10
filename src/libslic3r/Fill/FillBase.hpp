@@ -88,6 +88,10 @@ struct FillParams
 
     // For infills that produce closed loops to force printing those loops clockwise.
     bool        prefer_clockwise_movements { false };
+
+    // For the flow ratio calibration: Archimedean chords print the arcs at the corners first
+    // and the center spiral last, from its center outwards. The order of the paths has to be kept.
+    bool        flow_calibration_order { false };
 };
 static_assert(IsTriviallyCopyable<FillParams>::value, "FillParams class is not POD (and it should be - see constructor).");
 

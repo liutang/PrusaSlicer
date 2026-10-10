@@ -62,6 +62,7 @@
 #include "GUI_Factories.hpp"
 #include "GUI_ObjectList.hpp"
 #include "GalleryDialog.hpp"
+#include "CalibrationDialog.hpp"
 #include "NotificationManager.hpp"
 #include "Preferences.hpp"
 #include "WebViewPanel.hpp"
@@ -1743,6 +1744,24 @@ void MainFrame::init_menubar_as_editor()
 #endif // __APPLE__
     }
 
+    // Calibration menu
+    auto calibrationMenu = new wxMenu();
+    append_menu_item(calibrationMenu, wxID_ANY, _L("Temperature Tower") + dots, _L("Create a new project with a temperature tower to find the best nozzle temperature of a filament"),
+        [](wxCommandEvent&) { calibrate_temperature_tower(); }, "", nullptr,
+        [this]() { return m_plater != nullptr && m_plater->printer_technology() == ptFFF; }, this);
+    append_menu_item(calibrationMenu, wxID_ANY, _L("Max Volumetric Speed") + dots, _L("Create a new project with a test object to find the maximum volumetric speed of a filament"),
+        [](wxCommandEvent&) { calibrate_max_volumetric_speed(); }, "", nullptr,
+        [this]() { return m_plater != nullptr && m_plater->printer_technology() == ptFFF; }, this);
+    append_menu_item(calibrationMenu, wxID_ANY, _L("Pressure Advance") + dots, _L("Create a new project with a tower, line or pattern test to find the pressure advance of a filament"),
+        [](wxCommandEvent&) { calibrate_pressure_advance(); }, "", nullptr,
+        [this]() { return m_plater != nullptr && m_plater->printer_technology() == ptFFF; }, this);
+    append_menu_item(calibrationMenu, wxID_ANY, _L("Flow Ratio") + dots, _L("Create a new project with test tiles to find the extrusion multiplier of a filament"),
+        [](wxCommandEvent&) { calibrate_flow_ratio(); }, "", nullptr,
+        [this]() { return m_plater != nullptr && m_plater->printer_technology() == ptFFF; }, this);
+    append_menu_item(calibrationMenu, wxID_ANY, _L("Retraction") + dots, _L("Create a new project with a tower to find the retraction length of a filament"),
+        [](wxCommandEvent&) { calibrate_retraction(); }, "", nullptr,
+        [this]() { return m_plater != nullptr && m_plater->printer_technology() == ptFFF; }, this);
+
     // Help menu
     auto helpMenu = generate_help_menu();
 
@@ -1777,6 +1796,7 @@ void MainFrame::init_menubar_as_editor()
     m_menubar->Append(windowMenu, _L("&Window"));
     if (viewMenu) m_menubar->Append(viewMenu, _L("&View"));
     // Add additional menus from C++
+    m_menubar->Append(calibrationMenu, _L("C&alibration"));
     m_menubar->Append(wxGetApp().get_config_menu(this), _L("&Configuration"));
     m_menubar->Append(helpMenu, _L("&Help"));
 

@@ -545,6 +545,9 @@ void Layer::make_fills(FillAdaptive::Octree* adaptive_fill_octree, FillAdaptive:
         params.anchor_length_max          = surface_fill.params.anchor_length_max;
         params.resolution                 = resolution;
         params.use_arachne                = (perimeter_generator == PerimeterGeneratorType::Arachne && surface_fill.params.pattern == ipConcentric) || surface_fill.params.pattern == ipEnsuring;
+        params.flow_calibration_order     = surface_fill.params.extrusion_role == ExtrusionRole::TopSolidInfill &&
+                                            surface_fill.params.pattern == ipArchimedeanChords &&
+                                            layerm.region().config().calib_flowrate_topinfill_special_order.value;
         params.layer_height               = layerm.layer()->height;
         params.prefer_clockwise_movements = this->object()->print()->config().prefer_clockwise_movements;
 
@@ -579,7 +582,7 @@ void Layer::make_fills(FillAdaptive::Octree* adaptive_fill_octree, FillAdaptive:
                 ExtrusionEntityCollection *eec        = new ExtrusionEntityCollection();
                 auto                       fill_begin = uint32_t(layerm.fills().size());
                 // Only concentric fills are not sorted.
-                eec->no_sort = f->no_sort();
+                eec->no_sort = f->no_sort() || params.flow_calibration_order;
                 if (params.use_arachne) {
                     for (const ThickPolyline &thick_polyline : thick_polylines) {
                         Flow new_flow = surface_fill.params.flow.with_spacing(float(f->spacing));
@@ -608,7 +611,7 @@ void Layer::make_fills(FillAdaptive::Octree* adaptive_fill_octree, FillAdaptive:
                             surface_fill.params.extrusion_role,
 							ExtrusionFlow{ flow_mm3_per_mm, float(flow_width), surface_fill.params.flow.height() },
                             f->is_self_crossing()
-						}, !params.prefer_clockwise_movements);
+						}, !params.prefer_clockwise_movements && !params.flow_calibration_order);
                     layerm.m_fills.entities.push_back(eec);
                 }
                 insert_fills_into_islands(*this, uint32_t(surface_fill.region_id), fill_begin, uint32_t(layerm.fills().size()));

@@ -36,6 +36,8 @@ set(SLIC3R_GUI_SOURCES
     GUI/WebView.cpp
     GUI/WebView.hpp
     GUI/WebViewPlatformUtils.hpp
+    GUI/CalibrationDialog.cpp
+    GUI/CalibrationDialog.hpp
     GUI/SysInfoDialog.cpp
     GUI/SysInfoDialog.hpp
     GUI/KBShortcutsDialog.cpp

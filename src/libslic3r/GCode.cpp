@@ -2166,8 +2166,18 @@ static std::string emit_custom_color_change_gcode_per_print_z(
                 gcode += ";" + GCodeProcessor::reserved_tag(GCodeProcessor::ETags::Custom_Code) + "\n";
                 if (gcode_type == CustomGCode::Template)    // Template Custom Gcode
                     gcode += gcodegen.placeholder_parser_process("template_custom_gcode", config.template_custom_gcode, current_extruder_id);
-                else                                        // custom Gcode
+                else {                                      // custom Gcode
                     gcode += custom_gcode.extra;
+                    // The retraction calibration changes the retraction length of the active extruder with the height
+                    // by a comment in the custom G-code. The new length is valid until the end of the print.
+                    static const std::string retract_length_tag = ";CALIBRATION_RETRACT_LENGTH:";
+                    if (size_t pos = custom_gcode.extra.find(retract_length_tag); pos != std::string::npos) {
+                        const double length = string_to_double_decimal_point(std::string_view(custom_gcode.extra).substr(pos + retract_length_tag.size()));
+                        std::vector<double> &lengths = gcodegen.writer().config.retract_length.values;
+                        if (length >= 0. && current_extruder_id < lengths.size())
+                            lengths[current_extruder_id] = length;
+                    }
+                }
             }
             gcode += "\n";
         }
@@ -3450,6 +3460,10 @@ std::string GCodeGenerator::_extrude(
 
     // calculate extrusion length per distance unit
     double e_per_mm = m_writer.extruder()->e_per_mm3() * path_attr.mm3_per_mm;
+    // Flow ratio of the print region. Skirt, brim, supports and the wipe tower do not belong to a print region,
+    // the configuration of the region printed before them would be applied to them.
+    if (path_attr.role.is_perimeter() || path_attr.role.is_infill() || path_attr.role == ExtrusionRole::GapFill)
+        e_per_mm *= m_config.print_flow_ratio.value;
     if (m_writer.extrusion_axis().empty())
         // gcfNoExtrusion
         e_per_mm = 0;
