@@ -18,6 +18,34 @@ Downloads and release notes are on the [releases page](https://github.com/liutan
 
 Please report problems with this fork in its [issues](https://github.com/liutang/PrusaSlicer/issues), not to Prusa Research.
 
+## Disclaimer
+
+PrusaSlicer 2.9.6 Extended is an independent community project. It is not affiliated with, endorsed by, or supported by Prusa Research, Bondtech, or the OrcaSlicer project. Please do not contact them about problems with this fork.
+
+"Prusa", "PrusaSlicer", "Bondtech", "INDX" and "OrcaSlicer" are names and trademarks of their respective owners. They are used here only to describe what this software is based on and which hardware it works with.
+
+### No warranty
+
+This software is provided "as is", without warranty of any kind, express or implied, including the warranties of merchantability and fitness for a particular purpose. See sections 15 and 16 of the [GNU Affero General Public License v3.0](LICENSE) for the full terms.
+
+### The maintainer
+
+This fork is maintained by an individual in their own time, as a personal project. The maintainer:
+
+* makes no promise that the software is correct, complete, or suitable for your printer or your purpose
+* is under no obligation to provide support, fix problems, answer questions, or publish further releases
+* is not liable, to the extent permitted by law, for any damage or loss arising from the use of this software or its builds, including failed prints, wasted material, damage to a printer or other property, or personal injury
+
+The same applies to anyone who contributes to this fork.
+
+### Your responsibility
+
+You use this software at your own risk. In particular:
+
+* G-code produced by this build controls the temperature and movement of your printer. Check the preview and the settings before you print, and do not leave a printer unattended.
+* Using this software may affect the warranty or support you receive for your printer. Check with the manufacturer if that matters to you.
+* The downloadable builds are not code signed and are provided for convenience. You can build the application from the source code instead.
+
 The rest of this document is the original PrusaSlicer README.
 
 # PrusaSlicer
