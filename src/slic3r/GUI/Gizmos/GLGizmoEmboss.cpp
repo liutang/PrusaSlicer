@@ -493,7 +493,8 @@ namespace{
 bool check(ModelVolumeType volume_type) {
     return volume_type == ModelVolumeType::MODEL_PART ||
            volume_type == ModelVolumeType::NEGATIVE_VOLUME ||
-           volume_type == ModelVolumeType::PARAMETER_MODIFIER;
+           volume_type == ModelVolumeType::PARAMETER_MODIFIER ||
+           volume_type == ModelVolumeType::PRINT_ONLY_VOLUME;
 }
 }
 

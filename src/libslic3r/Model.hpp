@@ -366,6 +366,9 @@ enum class ModelVolumeType : int {
     PARAMETER_MODIFIER,
     SUPPORT_BLOCKER,
     SUPPORT_ENFORCER,
+    // The opposite of the negative volume: if an object has print only volumes, only what is inside of them is printed.
+    // Added at the end, so that the values of the other types do not change.
+    PRINT_ONLY_VOLUME,
 };
 
 // A printable object, possibly having multiple print volumes (each with its own set of parameters and materials),
@@ -844,6 +847,7 @@ public:
     void                set_type(const ModelVolumeType t) { m_type = t; }
 	bool                is_model_part()         const { return m_type == ModelVolumeType::MODEL_PART; }
     bool                is_negative_volume()    const { return m_type == ModelVolumeType::NEGATIVE_VOLUME; }
+    bool                is_print_only_volume()  const { return m_type == ModelVolumeType::PRINT_ONLY_VOLUME; }
 	bool                is_modifier()           const { return m_type == ModelVolumeType::PARAMETER_MODIFIER; }
 	bool                is_support_enforcer()   const { return m_type == ModelVolumeType::SUPPORT_ENFORCER; }
 	bool                is_support_blocker()    const { return m_type == ModelVolumeType::SUPPORT_BLOCKER; }

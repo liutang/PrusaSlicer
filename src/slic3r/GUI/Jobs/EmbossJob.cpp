@@ -1418,10 +1418,12 @@ bool is_valid(ModelVolumeType volume_type)
     assert(volume_type != ModelVolumeType::INVALID);
     assert(volume_type == ModelVolumeType::MODEL_PART || 
            volume_type == ModelVolumeType::NEGATIVE_VOLUME ||
-           volume_type == ModelVolumeType::PARAMETER_MODIFIER);
+           volume_type == ModelVolumeType::PARAMETER_MODIFIER ||
+           volume_type == ModelVolumeType::PRINT_ONLY_VOLUME);
     if (volume_type == ModelVolumeType::MODEL_PART || 
         volume_type == ModelVolumeType::NEGATIVE_VOLUME ||
-        volume_type == ModelVolumeType::PARAMETER_MODIFIER)
+        volume_type == ModelVolumeType::PARAMETER_MODIFIER ||
+        volume_type == ModelVolumeType::PRINT_ONLY_VOLUME)
         return true;
 
     BOOST_LOG_TRIVIAL(error) << "Can't create embossed volume with this type: " << (int) volume_type;

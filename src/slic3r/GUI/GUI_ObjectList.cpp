@@ -2879,7 +2879,8 @@ wxDataViewItem ObjectList::add_settings_item(wxDataViewItem parent_item, const D
     const bool is_object_settings = m_objects_model->GetItemType(parent_item) == itObject;
     if (!is_object_settings) {
         ModelVolumeType volume_type = m_objects_model->GetVolumeType(parent_item);
-        if (volume_type == ModelVolumeType::NEGATIVE_VOLUME || volume_type == ModelVolumeType::SUPPORT_BLOCKER || volume_type == ModelVolumeType::SUPPORT_ENFORCER)
+        if (volume_type == ModelVolumeType::NEGATIVE_VOLUME || volume_type == ModelVolumeType::SUPPORT_BLOCKER || volume_type == ModelVolumeType::SUPPORT_ENFORCER ||
+            volume_type == ModelVolumeType::PRINT_ONLY_VOLUME)
             return ret;
     }
 
@@ -4330,7 +4331,7 @@ void ObjectList::change_part_type()
     const bool is_cut_object = obj->is_cut();
     wxArrayString                   names;
     std::vector<ModelVolumeType>    types;
-    types.reserve(5);
+    types.reserve(6);
     if (!is_cut_object) {
         for (const wxString&        name    : { _L("Part"),                     _L("Negative Volume") })
             names.Add(name);
@@ -4339,6 +4340,8 @@ void ObjectList::change_part_type()
     }
 
     if (printer_technology() != ptSLA) {
+        names.Add(_L("Print Only Volume"));
+        types.emplace_back(ModelVolumeType::PRINT_ONLY_VOLUME);
         names.Add(_L("Modifier"));
         types.emplace_back(ModelVolumeType::PARAMETER_MODIFIER);
     }
