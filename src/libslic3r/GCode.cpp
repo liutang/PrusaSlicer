@@ -2177,6 +2177,18 @@ static std::string emit_custom_color_change_gcode_per_print_z(
                         if (length >= 0. && current_extruder_id < lengths.size())
                             lengths[current_extruder_id] = length;
                     }
+                    // The max volumetric speed calibration changes the speed of the external perimeters with the height the same way.
+                    // Layer ranges can not be used for it, as they would split the object into regions, which Spiral Vase does not allow.
+                    // An optional second comment makes the speed grow with the print height.
+                    static const std::string speed_tag        = ";CALIBRATION_SPEED:";
+                    static const std::string speed_per_mm_tag = ";CALIBRATION_SPEED_PER_MM:";
+                    if (size_t pos = custom_gcode.extra.find(speed_tag); pos != std::string::npos)
+                        if (const double speed = string_to_double_decimal_point(std::string_view(custom_gcode.extra).substr(pos + speed_tag.size())); speed > 0.) {
+                            double speed_per_mm = 0.;
+                            if (size_t pos_per_mm = custom_gcode.extra.find(speed_per_mm_tag); pos_per_mm != std::string::npos)
+                                speed_per_mm = string_to_double_decimal_point(std::string_view(custom_gcode.extra).substr(pos_per_mm + speed_per_mm_tag.size()));
+                            gcodegen.set_calibration_speed(speed, speed_per_mm);
+                        }
                 }
             }
             gcode += "\n";
@@ -3501,6 +3513,9 @@ std::string GCodeGenerator::_extrude(
     }
     if (m_volumetric_speed != 0. && speed == 0)
         speed = m_volumetric_speed / path_attr.mm3_per_mm;
+    // The first layer speed below is still applied.
+    if (m_calibration_speed > 0. && path_attr.role == ExtrusionRole::ExternalPerimeter)
+        speed = m_calibration_speed + m_calibration_speed_per_mm * (m_layer != nullptr ? m_layer->print_z : 0.);
     if (this->on_first_layer()) {
         const double first_layer_infill_speed{m_config.get_abs_value("first_layer_infill_speed", speed)};
         if (path_attr.role == ExtrusionRole::SolidInfill && first_layer_infill_speed > 0) {

@@ -21,6 +21,7 @@
 #include "libslic3r/FileReader.hpp"
 #include <LocalesUtils.hpp>
 #include "libslic3r/Flow.hpp"
+#include "libslic3r/Geometry/ConvexHull.hpp"
 #include "libslic3r/Model.hpp"
 #include "libslic3r/PresetBundle.hpp"
 #include "libslic3r/TriangleMesh.hpp"
@@ -185,6 +186,85 @@ void modify_filament_preset(int extruder, const std::function<void(DynamicPrintC
     }
 }
 
+// The print speed, at which an extrusion reaches the max volumetric speed of the filament loaded into the extruder (zero based)
+// or the max volumetric speed of the print settings. Returns zero if neither of them is set.
+double max_speed_by_volumetric_speed(int extruder, double mm3_per_mm)
+{
+    double max_volumetric_speed = wxGetApp().preset_bundle->prints.get_edited_preset().config.opt_float("max_volumetric_speed");
+    if (const Preset *preset = wxGetApp().preset_bundle->extruders_filaments[extruder].get_selected_preset(); preset != nullptr)
+        if (const double filament_max = preset->config.opt_float("filament_max_volumetric_speed", 0u);
+            filament_max > 0. && (max_volumetric_speed <= 0. || filament_max < max_volumetric_speed))
+            max_volumetric_speed = filament_max;
+    return max_volumetric_speed > 0. && mm3_per_mm > 0. ? max_volumetric_speed / mm3_per_mm : 0.;
+}
+
+// Change the options of the print settings.
+void modify_print_preset(const std::function<void(DynamicPrintConfig&)> &modify)
+{
+    if (Tab *tab = wxGetApp().get_tab(Preset::TYPE_PRINT); tab != nullptr) {
+        DynamicPrintConfig new_config = *tab->get_config();
+        modify(new_config);
+        tab->load_config(new_config);
+    }
+}
+
+// Switch the pressure equalizer off, as OrcaSlicer does it: it would smooth the changes of flow, which the test is to show.
+void disable_pressure_equalizer()
+{
+    const DynamicPrintConfig &print_config = wxGetApp().preset_bundle->prints.get_edited_preset().config;
+    if (print_config.opt_float("max_volumetric_extrusion_rate_slope_positive") != 0. || print_config.opt_float("max_volumetric_extrusion_rate_slope_negative") != 0.)
+        modify_print_preset([](DynamicPrintConfig &config) {
+            config.set_key_value("max_volumetric_extrusion_rate_slope_positive", new ConfigOptionFloat(0.));
+            config.set_key_value("max_volumetric_extrusion_rate_slope_negative", new ConfigOptionFloat(0.));
+        });
+}
+
+// PrusaSlicer has no brim made of ears, as OrcaSlicer has. Thus add a one layer high helper disk at each sharp corner
+// of the object, as one would do it by hand. The disks are printed solid, with perimeters only.
+// The object is expected to consist of a single part.
+void add_brim_ears(ModelObject *object, double radius, double height, double max_angle_deg)
+{
+    if (object->volumes.size() != 1)
+        return;
+    // Outline of the bottom of the object.
+    const ModelVolume *body  = object->volumes.front();
+    const Transform3d  trafo = body->get_matrix();
+    std::vector<Vec3d> vertices;
+    double             min_z = std::numeric_limits<double>::max();
+    for (const stl_vertex &v : body->mesh().its.vertices) {
+        vertices.emplace_back(trafo * v.cast<double>());
+        min_z = std::min(min_z, vertices.back().z());
+    }
+    Points bottom;
+    for (const Vec3d &v : vertices)
+        if (v.z() < min_z + EPSILON)
+            bottom.emplace_back(scaled<coord_t>(v.x()), scaled<coord_t>(v.y()));
+    const Polygon hull = Geometry::convex_hull(std::move(bottom));
+    if (hull.size() < 3)
+        return;
+
+    for (size_t i = 0; i < hull.size(); ++ i) {
+        const Vec2d corner = unscaled<double>(hull[i]);
+        const Vec2d to_prev = (unscaled<double>(hull[(i + hull.size() - 1) % hull.size()]) - corner).normalized();
+        const Vec2d to_next = (unscaled<double>(hull[(i + 1) % hull.size()]) - corner).normalized();
+        const double angle_deg = std::acos(std::clamp(to_prev.dot(to_next), -1., 1.)) * 180. / M_PI;
+        if (angle_deg > max_angle_deg + 0.5)
+            continue;
+        TriangleMesh disk = make_cylinder(radius, height);
+        disk.translate(float(corner.x()), float(corner.y()), float(min_z));
+        ModelVolume *ear = object->add_volume(std::move(disk));
+        ear->name = "Helper disk";
+        ear->config.set_key_value("extruder", new ConfigOptionInt(0));
+        ear->config.set_key_value("perimeters", new ConfigOptionInt(99));
+        // A one layer high disk is a top surface, which would be printed with a single perimeter and nothing inside of it.
+        ear->config.set_key_value("top_one_perimeter_type", new ConfigOptionEnum<TopOnePerimeterType>(TopOnePerimeterType::None));
+    }
+    // Where parts overlap, the part further down the list is printed. Thus the object has to follow its ears,
+    // so that its walls are not interrupted by them.
+    std::rotate(object->volumes.begin(), object->volumes.begin() + 1, object->volumes.end());
+    object->invalidate_bounding_box();
+}
+
 // To be called after the calibration object and the presets were set up.
 void finish_calibration_project()
 {
@@ -229,15 +309,16 @@ TempTowerDialog::TempTowerDialog(wxWindow *parent)
     add_row(_L("Start temperature (bottom)") + ":", m_start);
     add_row(_L("End temperature (top)") + ":", m_end);
 
-    auto *note = new wxStaticText(this, wxID_ANY,
-        format_wxstr(_L("The temperature decreases by %1% °C with each %2% mm high block of the tower.\n"
-                        "A new project will be created and the nozzle temperatures of the selected filament will be changed."),
-                     temp_tower_step, int(temp_tower_block_height)));
-    note->SetFont(wxGetApp().small_font());
+    // The option and its default are those of OrcaSlicer.
+    m_scale = new ::CheckBox(this, _L("Auto-scale for nozzle"));
+    m_scale->SetValue(true);
+    m_scale->SetToolTip(_L("The tower was designed for a 0.4 mm nozzle and a 0.2 mm layer height. If enabled, the tower is scaled "
+                           "to the nozzle diameter and it is printed with a layer height of half the nozzle diameter. "
+                           "If disabled, the tower is printed as it is, with the layer height of the print settings."));
 
     auto *top_sizer = new wxBoxSizer(wxVERTICAL);
     top_sizer->Add(grid, 0, wxEXPAND | wxALL, 2 * em);
-    top_sizer->Add(note, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 2 * em);
+    top_sizer->Add(m_scale, 0, wxLEFT | wxRIGHT | wxBOTTOM, 2 * em);
     add_buttons(this, top_sizer, em);
 
     m_filament_type->Bind(wxEVT_COMBOBOX, [this](wxCommandEvent&) { this->apply_filament_type(); });
@@ -286,6 +367,11 @@ int TempTowerDialog::extruder() const
     return std::max(0, m_extruder->GetSelection());
 }
 
+bool TempTowerDialog::scale_to_nozzle() const
+{
+    return m_scale->GetValue();
+}
+
 void TempTowerDialog::apply_filament_type()
 {
     const int selection = m_filament_type->GetSelection();
@@ -328,19 +414,25 @@ void calibrate_temperature_tower()
     if (plater == nullptr || wxGetApp().preset_bundle->printers.get_edited_preset().printer_technology() != ptFFF)
         return;
 
-    int start_temp, end_temp, extruder;
+    int  start_temp, end_temp, extruder;
+    bool scale_to_nozzle;
     {
         // The dialog has to be destroyed before the new project is started, as starting of the new project may open other modal dialogs.
         TempTowerDialog dialog(wxGetApp().mainframe);
         if (dialog.ShowModal() != wxID_OK)
             return;
-        start_temp = dialog.start_temperature();
-        end_temp   = dialog.end_temperature();
-        extruder   = dialog.extruder();
+        start_temp      = dialog.start_temperature();
+        end_temp        = dialog.end_temperature();
+        extruder        = dialog.extruder();
+        scale_to_nozzle = dialog.scale_to_nozzle();
     }
 
-    const int    num_blocks   = (start_temp - end_temp) / temp_tower_step + 1;
-    const double tower_height = num_blocks * temp_tower_block_height;
+    // The tower was designed for a 0.4 mm nozzle.
+    const double nozzle_diameter = wxGetApp().preset_bundle->printers.get_edited_preset().config.option<ConfigOptionFloats>("nozzle_diameter")->get_at(extruder);
+    const double scale           = scale_to_nozzle && nozzle_diameter > 0. ? nozzle_diameter / 0.4 : 1.;
+    const double block_height    = temp_tower_block_height * scale;
+    const int    num_blocks      = (start_temp - end_temp) / temp_tower_step + 1;
+    const double tower_height    = num_blocks * block_height;
     if (const double max_print_height = wxGetApp().preset_bundle->printers.get_edited_preset().config.opt_float("max_print_height");
         tower_height > max_print_height) {
         show_error(wxGetApp().mainframe, format_wxstr(_L("The temperature tower would be %1% mm high, which is more than the maximum print height "
@@ -354,7 +446,7 @@ void calibrate_temperature_tower()
         TriangleMesh mesh = load_calibration_mesh("temperature_tower/temperature_tower.3mf");
         // The bottom most block of the model is marked with the highest temperature.
         const double z_low  = double(temp_tower_max_temperature - start_temp) / temp_tower_step * temp_tower_block_height;
-        const double z_high = z_low + tower_height;
+        const double z_high = z_low + num_blocks * temp_tower_block_height;
         indexed_triangle_set its = mesh.its;
         if (z_high < mesh.bounding_box().size().z() - EPSILON) {
             indexed_triangle_set lower;
@@ -368,6 +460,8 @@ void calibrate_temperature_tower()
         }
         tower = TriangleMesh(std::move(its));
         tower.translate(0.f, 0.f, - float(z_low));
+        if (std::abs(scale - 1.) > EPSILON)
+            tower.scale(float(scale));
         if (tower.empty())
             throw Slic3r::RuntimeError("The model is empty.");
     } catch (const std::exception &ex) {
@@ -379,6 +473,14 @@ void calibrate_temperature_tower()
     if (object == nullptr)
         return;
     object->config.set_key_value("brim_width", new ConfigOptionFloat(5.));
+    // No scarf seam, as OrcaSlicer prints the test.
+    object->config.set_key_value("scarf_seam_placement", new ConfigOptionEnum<ScarfSeamPlacement>(ScarfSeamPlacement::nowhere));
+    if (scale_to_nozzle) {
+        object->config.set_key_value("layer_height", new ConfigOptionFloat(0.5 * nozzle_diameter));
+        modify_print_preset([nozzle_diameter](DynamicPrintConfig &config) {
+            config.set_key_value("first_layer_height", new ConfigOptionFloatOrPercent(0.5 * nozzle_diameter, false));
+        });
+    }
 
     // Print the tower with the start temperature from the first layer on.
     modify_filament_preset(extruder, [start_temp](DynamicPrintConfig &config) {
@@ -392,7 +494,7 @@ void calibrate_temperature_tower()
     custom_gcodes.mode = num_extruders() == 1 ? CustomGCode::SingleExtruder : CustomGCode::MultiAsSingle;
     for (int block = 1; block < num_blocks; ++ block) {
         const int temperature = start_temp - block * temp_tower_step;
-        custom_gcodes.gcodes.push_back({ block * temp_tower_block_height + 0.05, CustomGCode::Custom, extruder + 1, "",
+        custom_gcodes.gcodes.push_back({ block * block_height + 0.05, CustomGCode::Custom, extruder + 1, "",
             "M104 S" + std::to_string(temperature) + " ; temperature tower" });
     }
 
@@ -428,14 +530,8 @@ MaxVolumetricSpeedDialog::MaxVolumetricSpeedDialog(wxWindow *parent)
     add_row(_L("End volumetric speed") + ":", m_end);
     add_row(_L("Step") + ":", m_step);
 
-    auto *note = new wxStaticText(this, wxID_ANY,
-        _L("The volumetric speed grows by the step with each millimeter of height.\n"
-           "A new project will be created and the print and filament settings will be changed."));
-    note->SetFont(wxGetApp().small_font());
-
     auto *top_sizer = new wxBoxSizer(wxVERTICAL);
     top_sizer->Add(grid, 0, wxEXPAND | wxALL, 2 * em);
-    top_sizer->Add(note, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 2 * em);
     add_buttons(this, top_sizer, em);
 
     Bind(wxEVT_BUTTON, [this](wxCommandEvent &evt) {
@@ -482,7 +578,7 @@ void calibrate_max_volumetric_speed()
         step     = dialog.step();
         extruder = dialog.extruder();
     }
-    // One millimeter of height per volumetric speed.
+    // One millimeter of height per step of the volumetric speed.
     const int    num_steps = int(std::lround((end - start) / step)) + 1;
     const double height    = double(num_steps);
 
@@ -494,10 +590,9 @@ void calibrate_max_volumetric_speed()
     }
 
     // A wide and thick extrusion, so that the volumetric speed is reached at a moderate print speed.
-    // The layer height is chosen so that each millimeter of height holds a whole number of layers.
+    // The layer height and the line width are those of OrcaSlicer. The max layer height of the printer is raised below to allow it.
     const double nozzle_diameter  = printer_config.option<ConfigOptionFloats>("nozzle_diameter")->get_at(extruder);
-    const double max_layer_height = printer_config.option<ConfigOptionFloats>("max_layer_height")->get_at(extruder);
-    const double layer_height     = 1. / std::ceil(1. / std::min(0.8 * nozzle_diameter, max_layer_height > 0. ? max_layer_height : 0.75 * nozzle_diameter) - EPSILON);
+    const double layer_height     = 0.8 * nozzle_diameter;
     const double line_width       = 1.75 * nozzle_diameter;
     double       extrusion_multiplier = 1.;
     if (const Preset *preset = wxGetApp().preset_bundle->extruders_filaments[extruder].get_selected_preset(); preset != nullptr)
@@ -538,18 +633,19 @@ void calibrate_max_volumetric_speed()
     object->config.set_key_value("perimeter_extrusion_width", new ConfigOptionFloatOrPercent(line_width, false));
     object->config.set_key_value("enable_dynamic_overhang_speeds", new ConfigOptionBool(false));
     object->config.set_key_value("brim_width", new ConfigOptionFloat(5.));
+    object->config.set_key_value("brim_type", new ConfigOptionEnum<BrimType>(btOuterAndInner));
 
-    // The print speed is set by a layer range per millimeter of height.
-    // Spiral vase mode can not be used, as it does not allow layer ranges.
+    // The object is printed in Spiral Vase mode, so that there is no seam, at which the extrusion would stop.
+    // The print speed grows with each layer. It is set by a comment in the custom G-code, which is processed
+    // when the G-code is exported. Layer ranges can not be used, as Spiral Vase mode does not allow them.
     object->layer_config_ranges.clear();
-    for (int i = 0; i < num_steps; ++ i) {
-        ModelConfig range_config;
-        // The object list expects each layer range to carry the extruder (zero for the default one) and the layer height.
-        range_config.set_key_value("extruder", new ConfigOptionInt(0));
-        range_config.set_key_value("layer_height", new ConfigOptionFloat(layer_height));
-        range_config.set_key_value("external_perimeter_speed", new ConfigOptionFloatOrPercent((start + i * step) / mm3_per_mm, false));
-        object->layer_config_ranges[{ double(i), double(i + 1) }].assign_config(std::move(range_config));
-    }
+    object->config.set_key_value("external_perimeter_speed", new ConfigOptionFloatOrPercent(start / mm3_per_mm, false));
+    CustomGCode::Info &custom_gcodes = plater->model().custom_gcode_per_print_z();
+    custom_gcodes.gcodes.clear();
+    custom_gcodes.mode = num_extruders() == 1 ? CustomGCode::SingleExtruder : CustomGCode::MultiAsSingle;
+    custom_gcodes.gcodes.push_back({ 0.05, CustomGCode::Custom, extruder + 1, "",
+        ";CALIBRATION_SPEED:" + float_to_string_decimal_point(start / mm3_per_mm, 3) +
+        " ;CALIBRATION_SPEED_PER_MM:" + float_to_string_decimal_point(step / mm3_per_mm, 3) + " ; max volumetric speed test" });
 
     // Remove everything that would limit or change the print speed.
     modify_filament_preset(extruder, [](DynamicPrintConfig &config) {
@@ -557,9 +653,29 @@ void calibrate_max_volumetric_speed()
         config.set_key_value("filament_max_volumetric_speed", new ConfigOptionFloats{ std::max(max_volumetric_speed, 200.) });
         config.set_key_value("slowdown_below_layer_time", new ConfigOptionInts{ 0 });
     });
+    // The layer height of the test is higher than what the printer profiles usually allow.
+    if (Tab *tab = wxGetApp().get_tab(Preset::TYPE_PRINTER); tab != nullptr) {
+        DynamicPrintConfig new_config = *tab->get_config();
+        if (auto *max_layer_heights = new_config.option<ConfigOptionFloats>("max_layer_height");
+            max_layer_heights != nullptr && size_t(extruder) < max_layer_heights->values.size() &&
+            // A max layer height of zero stands for 75% of the nozzle diameter.
+            (max_layer_heights->values[extruder] > 0. ? max_layer_heights->values[extruder] : 0.75 * nozzle_diameter) < layer_height) {
+            max_layer_heights->values[extruder] = layer_height;
+            tab->load_config(new_config);
+        }
+    }
     if (Tab *tab = wxGetApp().get_tab(Preset::TYPE_PRINT); tab != nullptr) {
         DynamicPrintConfig new_config = *tab->get_config();
-        new_config.set_key_value("spiral_vase", new ConfigOptionBool(false));
+        // Spiral Vase mode and what it requires of the print settings.
+        new_config.set_key_value("spiral_vase", new ConfigOptionBool(true));
+        new_config.set_key_value("perimeters", new ConfigOptionInt(1));
+        new_config.set_key_value("top_solid_layers", new ConfigOptionInt(0));
+        new_config.set_key_value("fill_density", new ConfigOptionPercent(0));
+        new_config.set_key_value("support_material", new ConfigOptionBool(false));
+        new_config.set_key_value("support_material_enforce_layers", new ConfigOptionInt(0));
+        new_config.set_key_value("thin_walls", new ConfigOptionBool(false));
+        // A draft shield would switch Spiral Vase mode off.
+        new_config.set_key_value("draft_shield", new ConfigOptionEnum<DraftShield>(dsDisabled));
         new_config.set_key_value("first_layer_height", new ConfigOptionFloatOrPercent(layer_height, false));
         new_config.set_key_value("max_volumetric_speed", new ConfigOptionFloat(0.));
         new_config.set_key_value("max_volumetric_extrusion_rate_slope_positive", new ConfigOptionFloat(0.));
@@ -612,7 +728,10 @@ PressureAdvanceDialog::PressureAdvanceDialog(wxWindow *parent)
     m_start = create_number_field(settings->GetStaticBox(), 0., 10 * em);
     m_end   = create_number_field(settings->GetStaticBox(), 0.1, 10 * em);
     m_step  = create_number_field(settings->GetStaticBox(), 0.002, 10 * em);
-    m_speed = create_number_field(settings->GetStaticBox(), 100., 10 * em, "mm/s");
+    // OrcaSlicer prints the test with the speed of the external perimeters, but with 100 mm/s at least.
+    const DynamicPrintConfig &print_config = wxGetApp().preset_bundle->prints.get_edited_preset().config;
+    const double external_perimeter_speed  = print_config.option<ConfigOptionFloatOrPercent>("external_perimeter_speed")->get_abs_value(print_config.opt_float("perimeter_speed"));
+    m_speed = create_number_field(settings->GetStaticBox(), std::max(100., std::floor(external_perimeter_speed)), 10 * em, "mm/s");
     add_row(_L("Start PA") + ":", m_start);
     add_row(_L("End PA") + ":", m_end);
     add_row(_L("PA step") + ":", m_step);
@@ -774,6 +893,10 @@ public:
     // Pattern test: a chevron per pressure advance, each chevron made of a couple of nested walls.
     double pattern_line_width() const { return 1.125 * nozzle_diameter; }
     double pattern_line_spacing(double height) const { return pattern_line_width() - height * (1. - M_PI / 4.); }
+    // The frame and the box of the numbers are printed with wider lines at the first layer, for a better adhesion.
+    // The chevrons are printed with the same line width at all the layers, so that the layers are consistent.
+    double pattern_first_layer_line_width() const { return 1.4 * nozzle_diameter; }
+    double pattern_first_layer_line_spacing() const { return pattern_first_layer_line_width() - layer_height * (1. - M_PI / 4.); }
     // Distance of the walls of a chevron along the X axis.
     double pattern_wall_step() const { return pattern_line_spacing(other_layer_height) * std::sqrt(2.); }
     double pattern_pitch() const { return (pattern_walls - 1) * pattern_wall_step() + pattern_spacing + pattern_line_width(); }
@@ -784,7 +907,7 @@ public:
     // Height of the box with the numbers above the frame.
     static double pattern_tab_height() { return max_digits * digit_spacing + 2.; }
     // Width of the outer walls of the frame around the inner rectangle of the frame.
-    double pattern_frame_width() const { return (pattern_walls - 1) * pattern_line_spacing(layer_height) + 0.5 * pattern_line_width(); }
+    double pattern_frame_width() const { return (pattern_walls - 1) * pattern_first_layer_line_spacing() + 0.5 * pattern_first_layer_line_width(); }
     // Size of the inner rectangle of the frame.
     Vec2d  pattern_inner_size(int num_patterns) const
     {
@@ -839,14 +962,16 @@ public:
 
             if (layer == 0) {
                 // The frame, from its inner most wall outwards.
-                const double spacing = this->pattern_line_spacing(height);
+                const double spacing = this->pattern_first_layer_line_spacing();
+                const double e_frame = this->e_per_mm(this->pattern_first_layer_line_width(), height);
+                this->tags(this->pattern_first_layer_line_width(), height);
                 for (int i = 0; i < pattern_walls; ++ i) {
                     const double o = i * spacing;
                     this->travel(x0 - o, y0 - o);
-                    this->extrude(x0 - o, y1 + o, e, speed);
-                    this->extrude(x1 + o, y1 + o, e, speed);
-                    this->extrude(x1 + o, y0 - o, e, speed);
-                    this->extrude(x0 - o, y0 - o, e, speed);
+                    this->extrude(x0 - o, y1 + o, e_frame, speed);
+                    this->extrude(x1 + o, y1 + o, e_frame, speed);
+                    this->extrude(x1 + o, y0 - o, e_frame, speed);
+                    this->extrude(x0 - o, y0 - o, e_frame, speed);
                 }
                 // A filled box above the frame as a base of the numbers.
                 const double o       = (pattern_walls - 1) * spacing;
@@ -856,20 +981,21 @@ public:
                 this->travel(x0 - o, tab_y0);
                 for (double y = tab_y0; y <= tab_y1 + EPSILON; y += spacing) {
                     if (y > tab_y0)
-                        this->extrude(to_right ? x0 - o : x1 + o, y, e, speed);
-                    this->extrude(to_right ? x1 + o : x0 - o, y, e, speed);
+                        this->extrude(to_right ? x0 - o : x1 + o, y, e_frame, speed);
+                    this->extrude(to_right ? x1 + o : x0 - o, y, e_frame, speed);
                     to_right = ! to_right;
                 }
+                this->tags(w, height);
             } else if (layer == 1) {
                 // The numbers read from the bottom to the top, each second chevron is marked.
-                const double tab_y0 = y1 + (pattern_walls - 1) * this->pattern_line_spacing(layer_height) + 1.5;
+                const double tab_y0 = y1 + (pattern_walls - 1) * this->pattern_first_layer_line_spacing() + 1.5;
                 for (int i = 0; i < num_patterns; i += 2)
                     this->draw_number(x0 + this->pattern_margin() + i * this->pattern_pitch() + 0.5 * (pattern_walls - 1) * this->pattern_wall_step() + digit_segment,
                                       tab_y0, start_pa + i * step_pa, decimals, true);
             }
 
             // The first layer chevrons end short of the frame, the other chevrons start and end over the frame.
-            const double inset = layer == 0 ? w : 0.;
+            const double inset = layer == 0 ? 0.5 * (w + this->pattern_first_layer_line_width()) : 0.;
             for (int i = 0; i < num_patterns; ++ i) {
                 this->set_pressure_advance(start_pa + i * step_pa);
                 for (int wall = 0; wall < pattern_walls; ++ wall) {
@@ -1193,7 +1319,26 @@ void calibrate_pressure_advance_tower(const PressureAdvanceGCode &generator, dou
     object->config.set_key_value("bottom_solid_layers", new ConfigOptionInt(0));
     object->config.set_key_value("fill_density", new ConfigOptionPercent(0));
     object->config.set_key_value("seam_position", new ConfigOptionEnum<SeamPosition>(spRear));
-    object->config.set_key_value("brim_width", new ConfigOptionFloat(5.));
+    // Ears at the corners of the tower instead of a brim, as OrcaSlicer does it.
+    object->config.set_key_value("brim_width", new ConfigOptionFloat(0.));
+    // No scarf seam, as OrcaSlicer prints the test.
+    object->config.set_key_value("scarf_seam_placement", new ConfigOptionEnum<ScarfSeamPlacement>(ScarfSeamPlacement::nowhere));
+    add_brim_ears(object, 6., generator.layer_height, 135.);
+    disable_pressure_equalizer();
+    // Print the perimeters as fast as the max volumetric speed allows, as OrcaSlicer does it: the faster the print,
+    // the more the corners show the pressure advance.
+    {
+        const DynamicPrintConfig &print_config = wxGetApp().preset_bundle->prints.get_edited_preset().config;
+        auto max_speed = [&print_config, &generator, extruder](FlowRole role, const char *width_key) {
+            const Flow flow = Flow::new_from_config_width(role, *print_config.option<ConfigOptionFloatOrPercent>(width_key),
+                                                          float(generator.nozzle_diameter), float(print_config.opt_float("layer_height")));
+            return std::floor(max_speed_by_volumetric_speed(extruder, flow.mm3_per_mm()));
+        };
+        if (const double speed = max_speed(frPerimeter, "perimeter_extrusion_width"); speed > 0.)
+            object->config.set_key_value("perimeter_speed", new ConfigOptionFloat(speed));
+        if (const double speed = max_speed(frExternalPerimeter, "external_perimeter_extrusion_width"); speed > 0.)
+            object->config.set_key_value("external_perimeter_speed", new ConfigOptionFloatOrPercent(speed, false));
+    }
 
     // Do not let the cooling slow the print down.
     modify_filament_preset(extruder, [](DynamicPrintConfig &config) {
@@ -1318,9 +1463,21 @@ void calibrate_pressure_advance()
     generator.layer_height       = print_config.option<ConfigOptionFloatOrPercent>("first_layer_height")->get_abs_value(generator.other_layer_height);
     generator.first_layer_z      = generator.layer_height + printer_config.opt_float("z_offset");
     generator.travel_speed       = print_config.opt_float("travel_speed");
-    generator.first_layer_speed  = print_config.option<ConfigOptionFloatOrPercent>("first_layer_speed")->get_abs_value(generator.fast_speed);
-    if (generator.first_layer_speed <= 0.)
-        generator.first_layer_speed = 30.;
+    // The lines and the chevrons are drawn by custom G-code, which the slicer does not slow down.
+    // Thus limit their speed by the max volumetric speed here, as OrcaSlicer does it.
+    double requested_speed = 0.;
+    if (method != Method::Tower) {
+        const double mm3_per_mm = method == Method::Line ?
+            Flow(float(generator.line_width()), float(generator.layer_height), float(generator.nozzle_diameter)).mm3_per_mm() :
+            Flow(float(generator.pattern_line_width()), float(generator.other_layer_height), float(generator.nozzle_diameter)).mm3_per_mm();
+        if (const double max_speed = std::floor(max_speed_by_volumetric_speed(extruder, mm3_per_mm)); max_speed > 0. && max_speed < generator.fast_speed) {
+            requested_speed      = generator.fast_speed;
+            // The line test needs the fast section to be clearly faster than its slow sections, which are printed at 10 mm/s at least.
+            generator.fast_speed = std::max(max_speed, 15.);
+        }
+    }
+    // The first layer of the pattern test is printed with the speed OrcaSlicer prints it with.
+    generator.first_layer_speed  = 30.;
     generator.acceleration       = print_config.opt_float("external_perimeter_acceleration");
     if (generator.acceleration <= 0.)
         generator.acceleration = print_config.opt_float("default_acceleration");
@@ -1334,6 +1491,10 @@ void calibrate_pressure_advance()
     case Method::Line:    calibrate_pressure_advance_line(generator, start, end, step); break;
     case Method::Pattern: calibrate_pressure_advance_pattern(generator, start, end, step); break;
     }
+
+    if (requested_speed > generator.fast_speed)
+        show_info(wxGetApp().mainframe, format_wxstr(_L("The print speed was lowered from %1% mm/s to %2% mm/s, so that the max volumetric speed is not exceeded."),
+                                                     requested_speed, generator.fast_speed), _L("PA Calibration"));
 }
 
 FlowRatioDialog::FlowRatioDialog(wxWindow *parent)
@@ -1497,12 +1658,35 @@ void calibrate_flow_ratio()
     for (size_t i = 1; i < tiles.size(); ++ i)
         wxGetApp().obj_list()->load_mesh_object(tiles[i].mesh, into_u8(tile_name(tiles[i])), false);
 
+    // Limit the speeds of the solid infill and of the top solid infill, so that the tile with the highest flow
+    // does not exceed the max volumetric speed, as OrcaSlicer does it. All the tiles are printed with the same speeds.
+    auto flow_ratio_of = [absolute_steps, extrusion_multiplier](const Tile &tile)
+        { return absolute_steps ? (extrusion_multiplier + tile.change) / extrusion_multiplier : 1. + 0.01 * tile.change; };
+    double solid_infill_speed     = 0.;
+    double top_solid_infill_speed = 0.;
+    {
+        double max_flow_ratio = 1.;
+        for (const Tile &tile : tiles)
+            max_flow_ratio = std::max(max_flow_ratio, flow_ratio_of(tile));
+        const double mm3_per_mm = Flow(float(1.2 * nozzle_diameter), float(layer_height), float(nozzle_diameter)).mm3_per_mm() * max_flow_ratio;
+        if (const double max_speed = std::floor(max_speed_by_volumetric_speed(extruder, mm3_per_mm)); max_speed > 0.) {
+            // A speed of zero stands for the automatic speed.
+            const double solid = print_config.option<ConfigOptionFloatOrPercent>("solid_infill_speed")->get_abs_value(print_config.opt_float("infill_speed"));
+            const double top   = print_config.option<ConfigOptionFloatOrPercent>("top_solid_infill_speed")->get_abs_value(solid);
+            solid_infill_speed     = solid > 0. ? std::min(solid, max_speed) : max_speed;
+            top_solid_infill_speed = top > 0. ? std::min(top, max_speed) : max_speed;
+        }
+    }
+
     Model &model = plater->model();
     for (size_t i = 0; i < tiles.size() && i < model.objects.size(); ++ i) {
         ModelConfigObject &config = model.objects[i]->config;
         config.set_key_value("extruder", new ConfigOptionInt(extruder + 1));
-        config.set_key_value("print_flow_ratio", new ConfigOptionFloat(absolute_steps ?
-            (extrusion_multiplier + tiles[i].change) / extrusion_multiplier : 1. + 0.01 * tiles[i].change));
+        config.set_key_value("print_flow_ratio", new ConfigOptionFloat(flow_ratio_of(tiles[i])));
+        if (solid_infill_speed > 0.) {
+            config.set_key_value("solid_infill_speed", new ConfigOptionFloatOrPercent(solid_infill_speed, false));
+            config.set_key_value("top_solid_infill_speed", new ConfigOptionFloatOrPercent(top_solid_infill_speed, false));
+        }
         config.set_key_value("layer_height", new ConfigOptionFloat(layer_height));
         // A single perimeter and a wide monotonic top infill, so that the top surface shows the flow.
         config.set_key_value("perimeters", new ConfigOptionInt(1));
@@ -1524,7 +1708,10 @@ void calibrate_flow_ratio()
         config.set_key_value("top_infill_extrusion_width", new ConfigOptionFloatOrPercent(1.2 * nozzle_diameter, false));
         config.set_key_value("solid_infill_extrusion_width", new ConfigOptionFloatOrPercent(1.2 * nozzle_diameter, false));
         config.set_key_value("brim_width", new ConfigOptionFloat(0.));
+        // No scarf seam, as OrcaSlicer prints the test.
+        config.set_key_value("scarf_seam_placement", new ConfigOptionEnum<ScarfSeamPlacement>(ScarfSeamPlacement::nowhere));
     }
+    disable_pressure_equalizer();
 
     finish_calibration_project();
 }
@@ -1619,11 +1806,6 @@ void calibrate_retraction()
                                                          "of the printer (%2% mm). Use a smaller range or a bigger step."), height, max_print_height));
         return;
     }
-    if (printer_config.opt_bool("use_firmware_retraction")) {
-        show_error(wxGetApp().mainframe, _L("The retraction test can not be used with the firmware retraction. "
-                                            "Disable \"Use firmware retraction\" in Printer Settings."));
-        return;
-    }
 
     TriangleMesh tower;
     try {
@@ -1653,6 +1835,17 @@ void calibrate_retraction()
     object->config.set_key_value("bottom_solid_layers", new ConfigOptionInt(3));
     object->config.set_key_value("fill_density", new ConfigOptionPercent(0));
     object->config.set_key_value("seam_position", new ConfigOptionEnum<SeamPosition>(spAligned));
+    object->config.set_key_value("external_perimeters_first", new ConfigOptionBool(false));
+    // No scarf seam, as OrcaSlicer prints the test.
+    object->config.set_key_value("scarf_seam_placement", new ConfigOptionEnum<ScarfSeamPlacement>(ScarfSeamPlacement::nowhere));
+    // The test changes the retraction length written into the G-code, which the firmware retraction would ignore.
+    // Thus switch the firmware retraction off, as OrcaSlicer does it.
+    if (printer_config.opt_bool("use_firmware_retraction"))
+        if (Tab *tab = wxGetApp().get_tab(Preset::TYPE_PRINTER); tab != nullptr) {
+            DynamicPrintConfig new_config = *tab->get_config();
+            new_config.set_key_value("use_firmware_retraction", new ConfigOptionBool(false));
+            tab->load_config(new_config);
+        }
 
     // Change the retraction length with the first layer of each millimeter of height above the base.
     CustomGCode::Info &custom_gcodes = plater->model().custom_gcode_per_print_z();

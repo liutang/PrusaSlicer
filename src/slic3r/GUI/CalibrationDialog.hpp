@@ -28,6 +28,8 @@ public:
     int end_temperature() const;
     // Zero based index of the extruder to calibrate.
     int extruder() const;
+    // Scale the tower and its layer height to the nozzle diameter.
+    bool scale_to_nozzle() const;
 
 protected:
     void on_dpi_changed(const wxRect &suggested_rect) override;
@@ -40,6 +42,7 @@ private:
     ::ComboBox   *m_filament_type { nullptr };
     ::TextInput *m_start         { nullptr };
     ::TextInput *m_end           { nullptr };
+    ::CheckBox  *m_scale         { nullptr };
 };
 
 // Parameters of the maximum volumetric speed calibration. Adapted from OrcaSlicer.
