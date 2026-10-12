@@ -132,7 +132,7 @@ void PreferencesDialog::show(const std::string& highlight_opt_key /*= std::strin
 	if (wxGetApp().is_editor()) {
 		auto app_config = get_app_config();
 
-		downloader->set_path_name(app_config->get("url_downloader_dest"));
+		downloader->set_path_name(DownloaderUtils::get_download_dest(*app_config));
 		downloader->allow(!app_config->has("downloader_url_registered") || app_config->get_bool("downloader_url_registered"));
 
 		for (const std::string opt_key : {"suppress_hyperlinks", "downloader_url_registered", "show_login_button", "show_step_import_parameters"})

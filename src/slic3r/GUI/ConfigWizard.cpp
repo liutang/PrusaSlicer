@@ -13,6 +13,7 @@
 #include "ConfigWizardWebViewPage.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <numeric>
 #include <utility>
 #include <unordered_map>
@@ -1565,13 +1566,69 @@ namespace {
         return wxString();
     }
 #endif
+
+    // Key of the download path of this operating system.
+    const char* os_download_dest_key()
+    {
+#ifdef _WIN32
+        return "url_downloader_dest_windows";
+#elif __APPLE__
+        return "url_downloader_dest_macos";
+#else
+        return "url_downloader_dest_linux";
+#endif
+    }
+
+    // Key of the download path used before the path was stored per operating system. Other builds of PrusaSlicer read it.
+    const char* legacy_download_dest_key() { return "url_downloader_dest"; }
+
+    // Is it an absolute path of this operating system? A path stored by another operating system is not.
+    bool is_native_absolute_path(const std::string &path)
+    {
+#ifdef _WIN32
+        return (path.size() >= 3 && std::isalpha(static_cast<unsigned char>(path[0])) && path[1] == ':' && (path[2] == '\\' || path[2] == '/')) ||
+               path.compare(0, 2, "\\\\") == 0;
+#else
+        return ! path.empty() && path.front() == '/';
+#endif
+    }
+
+    // Is it a folder existing on this computer? A path stored by another computer may not be, even if that computer
+    // runs the same operating system or an operating system with the same form of paths, as macOS and Linux have.
+    bool is_existing_folder(const std::string &path)
+    {
+        if (! is_native_absolute_path(path))
+            return false;
+        boost::system::error_code ec;
+        return boost::filesystem::is_directory(boost::filesystem::path(path), ec) && ! ec;
+    }
  }
+
+std::string get_download_dest(const AppConfig &app_config)
+{
+    // A stored path is only used if the folder exists on this computer.
+    if (std::string path = app_config.get(os_download_dest_key()); is_existing_folder(path))
+        return path;
+    // The path stored by a build, which did not store it per operating system.
+    if (std::string path = app_config.get(legacy_download_dest_key()); is_existing_folder(path))
+        return path;
+    return into_u8(get_downloads_path());
+}
+
+void set_download_dest(AppConfig &app_config, const std::string &path)
+{
+    app_config.set(os_download_dest_key(), path);
+    // Keep the path used by the other builds of PrusaSlicer up to date, unless it belongs to another computer.
+    if (const std::string legacy = app_config.get(legacy_download_dest_key()); legacy.empty() || is_existing_folder(legacy))
+        app_config.set(legacy_download_dest_key(), path);
+}
+
 Worker::Worker(wxWindow* parent)
 : wxBoxSizer(wxHORIZONTAL)
 , m_parent(parent)
 {
     m_input_path = new wxTextCtrl(m_parent, wxID_ANY);
-    set_path_name(get_app_config()->get("url_downloader_dest"));
+    set_path_name(get_download_dest(*get_app_config()));
 
     auto* path_label = new wxStaticText(m_parent, wxID_ANY, _L("Download path") + ":");
 
@@ -1599,7 +1656,7 @@ Worker::Worker(wxWindow* parent)
 void Worker::set_path_name(wxString path)
 {
     if (path.empty())
-        path = boost::nowide::widen(get_app_config()->get("url_downloader_dest"));
+        path = boost::nowide::widen(get_download_dest(*get_app_config()));
 
     if (path.empty()) {
         // What should be default path? Each system has Downloads folder, that could be good one.
@@ -1713,7 +1770,7 @@ bool DownloaderUtils::Worker::perform_download_register(const std::string& path)
         return false;
     }
     BOOST_LOG_TRIVIAL(info) << "Downloader registration: Directory for downloads: " << chosen_dest.string();
-    wxGetApp().app_config->set("url_downloader_dest", chosen_dest.string());
+    set_download_dest(*wxGetApp().app_config, chosen_dest.string());
     return perform_url_register();
 }
 bool DownloaderUtils::Worker::perform_url_register()
