@@ -1384,7 +1384,8 @@ Print::ApplyStatus Print::apply(const Model &model, DynamicPrintConfig new_full_
     PrintObjectStatusDB print_object_status_db(m_objects);
 
     // 3) Synchronize ModelObjects & PrintObjects.
-    const std::initializer_list<ModelVolumeType> solid_or_modifier_types { ModelVolumeType::MODEL_PART, ModelVolumeType::NEGATIVE_VOLUME, ModelVolumeType::PARAMETER_MODIFIER };
+    // A change of a print only volume invalidates the slicing as well, as the slices are clipped by the print only volumes.
+    const std::initializer_list<ModelVolumeType> solid_or_modifier_types { ModelVolumeType::MODEL_PART, ModelVolumeType::NEGATIVE_VOLUME, ModelVolumeType::PARAMETER_MODIFIER, ModelVolumeType::PRINT_ONLY_VOLUME };
     for (size_t idx_model_object = 0; idx_model_object < model.objects.size(); ++ idx_model_object) {
         ModelObject       &model_object        = *m_model.objects[idx_model_object];
         ModelObjectStatus &model_object_status = const_cast<ModelObjectStatus&>(model_object_status_db.reuse(model_object));

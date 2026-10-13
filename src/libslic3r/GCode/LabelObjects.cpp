@@ -26,6 +26,9 @@ namespace {
 Polygon instance_outline(const PrintInstance* pi)
 {
     ExPolygons outline;
+    // Outline of the print only volumes, the object is clipped with.
+    Polygons   print_only_outline;
+    bool       has_print_only_volume = false;
     const ModelObject* mo = pi->model_instance->get_object();
     const ModelInstance* mi = pi->model_instance;
     for (const ModelVolume *v : mo->volumes) {
@@ -36,9 +39,15 @@ Polygon instance_outline(const PrintInstance* pi)
         switch (v->type()) {
         case ModelVolumeType::MODEL_PART: outline = union_ex(outline, vol_outline); break;
         case ModelVolumeType::NEGATIVE_VOLUME: outline = diff_ex(outline, vol_outline); break;
+        case ModelVolumeType::PRINT_ONLY_VOLUME:
+            append(print_only_outline, std::move(vol_outline));
+            has_print_only_volume = true;
+            break;
         default:;
         }
     }
+    if (has_print_only_volume)
+        outline = intersection_ex(outline, union_(print_only_outline));
 
     // The projection may contain multiple polygons, which is not supported by Klipper.
     // When that happens, calculate and use a 2d convex hull instead.
