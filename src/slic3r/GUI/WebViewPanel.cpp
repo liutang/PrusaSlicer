@@ -10,6 +10,7 @@
 #include "slic3r/GUI/WebViewPlatformUtils.hpp"
 #include "slic3r/GUI/MsgDialog.hpp"
 #include "slic3r/GUI/Field.hpp"
+#include "slic3r/GUI/ConfigWizard.hpp"
 #include "slic3r/Utils/Http.hpp"
 #include "libslic3r/AppConfig.hpp"
 #include "libslic3r/Config.hpp"
@@ -1758,7 +1759,7 @@ void PrintablesWebViewPanel::show_download_notification(const std::string& filen
     // Solution is to URL-encode the strings here and pass it.
     // Then inside javascript decodes it.
     const std::string message_filename = Http::url_encode(GUI::format(_u8L("Downloading %1%"),filename));
-    const std::string message_dest = Http::url_encode(GUI::format(_u8L("To %1%"), wxGetApp().app_config->get("url_downloader_dest")));
+    const std::string message_dest = Http::url_encode(GUI::format(_u8L("To %1%"), DownloaderUtils::get_download_dest(*wxGetApp().app_config)));
     std::string script = GUI::format(R"(
         function removeNotification() {
             const notifDiv = document.getElementById('slicer-notification');
