@@ -198,6 +198,14 @@ TagCheckResult tag_check_material(const std::string& tag)
 	return TagCheckNotCompatible;
 }
 
+// Tags of the preferences: "NumberKeysTool" is affirmative if the number keys change the tool instead of the camera view.
+TagCheckResult tag_check_preference(const std::string& tag)
+{
+	if (tag == "NumberKeysTool")
+		return wxGetApp().app_config->get_bool("number_keys_select_tool") ? TagCheckAffirmative : TagCheckNegative;
+	return TagCheckNotCompatible;
+}
+
 // return true if NOT in disabled mode.
 bool tags_check(const std::string& disabled_tags, const std::string& enabled_tags)
 {
@@ -233,6 +241,11 @@ bool tags_check(const std::string& disabled_tags, const std::string& enabled_tag
 					if (result == TagCheckResult::TagCheckAffirmative)
 						continue;
 					result = tag_check_material(tag);
+					if (result == TagCheckResult::TagCheckNegative)
+						return false;
+					if (result == TagCheckResult::TagCheckAffirmative)
+						continue;
+					result = tag_check_preference(tag);
 					if (result == TagCheckResult::TagCheckNegative)
 						return false;
 					if (result == TagCheckResult::TagCheckAffirmative)
@@ -274,6 +287,11 @@ bool tags_check(const std::string& disabled_tags, const std::string& enabled_tag
 					if (result == TagCheckResult::TagCheckNegative)
 						continue;
 					result = tag_check_material(tag);
+					if (result == TagCheckResult::TagCheckAffirmative)
+						return false;
+					if (result == TagCheckResult::TagCheckNegative)
+						continue;
+					result = tag_check_preference(tag);
 					if (result == TagCheckResult::TagCheckAffirmative)
 						return false;
 					if (result == TagCheckResult::TagCheckNegative)
