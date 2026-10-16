@@ -629,6 +629,27 @@ void PrintConfigDef::init_fff_params()
     def->mode = comExpert;
     def->set_default_value(new ConfigOptionFloatOrPercent(0., false));
 
+    def = this->add("cool_plate", coBool);
+    def->label = L("Cool plate");
+    def->tooltip = L("Check this if the print sheet is a cool plate, which needs a lower bed temperature. "
+                     "The bed temperatures of the filaments are then adjusted by their cool plate bed temperature offset.");
+    def->mode = comSimple;
+    def->set_default_value(new ConfigOptionBool(false));
+
+    def = this->add("cool_plate_bed_temperature_offset", coInts);
+    def->label = L("Cool plate offset");
+    def->full_label = L("Cool plate bed temperature offset");
+    def->tooltip = L("This value is added to the bed temperatures of the first layer and of the other layers "
+                     "if a cool plate is used, which is set by the \"Cool plate\" option of the print settings. "
+                     "It can only lower the bed temperature, thus it is zero or negative. "
+                     "For example, -15 prints a filament with a bed temperature of 60 °C at 45 °C on a cool plate. "
+                     "A bed temperature of zero, which switches the bed off, is not changed.");
+    def->sidetext = L("°C");
+    def->min = -100;
+    def->max = 0;
+    def->mode = comSimple;
+    def->set_default_value(new ConfigOptionInts { 0 });
+
     def = this->add("bed_temperature", coInts);
     def->label = L("Other layers");
     def->tooltip = L("Bed temperature for layers after the first one. "
@@ -6658,6 +6679,15 @@ bool is_XL_printer(const DynamicPrintConfig &cfg)
 bool is_XL_printer(const PrintConfig &cfg)
 {
     return is_XL_printer(cfg.printer_notes.value);
+}
+
+int effective_bed_temperature(const PrintConfig &config, unsigned int extruder_id, bool first_layer)
+{
+    const int temperature = (first_layer ? config.first_layer_bed_temperature : config.bed_temperature).get_at(extruder_id);
+    if (! config.cool_plate.value || temperature <= 0)
+        return temperature;
+    // The offset only lowers the bed temperature, even if a positive value got into the configuration from a file.
+    return std::max(0, temperature + std::min(0, config.cool_plate_bed_temperature_offset.get_at(extruder_id)));
 }
 
 } // namespace Slic3r

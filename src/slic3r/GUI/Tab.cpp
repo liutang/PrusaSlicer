@@ -1203,7 +1203,7 @@ void Tab::on_value_change(const std::string& opt_key, const boost::any& value)
 
     const bool is_fff = supports_printer_technology(ptFFF);
     ConfigOptionsGroup* og_freq_chng_params = wxGetApp().sidebar().og_freq_chng_params(is_fff);
-    if (opt_key == "fill_density" || opt_key == "pad_enable")
+    if (opt_key == "fill_density" || opt_key == "pad_enable" || opt_key == "cool_plate")
     {
         boost::any val = og_freq_chng_params->get_config_value(*m_config, opt_key);
         og_freq_chng_params->set_value(opt_key, val);
@@ -1523,6 +1523,7 @@ void Tab::update_frequently_changed_parameters()
     if (is_fff)
     {
         og_freq_chng_params->set_value("brim", bool(m_config->opt_float("brim_width") > 0.0));
+        og_freq_chng_params->set_value("cool_plate", og_freq_chng_params->get_config_value(*m_config, "cool_plate"));
         update_wiping_button_visibility();
     }
 }
@@ -1661,6 +1662,9 @@ void TabPrint::build()
         optgroup->append_single_option_line("brim_type", category_path + "brim");
         optgroup->append_single_option_line("brim_width", category_path + "brim");
         optgroup->append_single_option_line("brim_separation", category_path + "brim");
+
+        optgroup = page->new_optgroup(L("Build plate"));
+        optgroup->append_single_option_line("cool_plate");
 
     page = add_options_page(L("Support material"), "support");
         category_path = "support-material_1698#";
@@ -2355,6 +2359,8 @@ void TabFilament::build()
         line.append_option(optgroup->get_option("first_layer_bed_temperature"));
         line.append_option(optgroup->get_option("bed_temperature"));
         optgroup->append_line(line);
+
+        optgroup->append_single_option_line("cool_plate_bed_temperature_offset");
 
         line = { L("Chamber"), "" };
         line.append_option(optgroup->get_option("chamber_temperature"));

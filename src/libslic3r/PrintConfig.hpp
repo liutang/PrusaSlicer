@@ -966,6 +966,8 @@ PRINT_CONFIG_CLASS_DERIVED_DEFINE(
     ((ConfigOptionFloatOrPercent,     avoid_crossing_perimeters_max_detour))
     ((ConfigOptionPoints,             bed_shape))
     ((ConfigOptionInts,               bed_temperature))
+    ((ConfigOptionBool,               cool_plate))
+    ((ConfigOptionInts,               cool_plate_bed_temperature_offset))
     ((ConfigOptionFloat,              bridge_acceleration))
     ((ConfigOptionInts,               bridge_fan_speed))
     ((ConfigOptionBools,              enable_dynamic_fan_speeds))
@@ -1064,6 +1066,10 @@ PRINT_CONFIG_CLASS_DERIVED_DEFINE0(
 
 // Validate the FullPrintConfig. Returns an empty string on success, otherwise an error message is returned.
 std::string validate(const FullPrintConfig &config);
+
+// Bed temperature of the filament of the extruder (zero based) of the first layer or of the other layers,
+// adjusted by the cool plate bed temperature offset of the filament if a cool plate is used.
+int effective_bed_temperature(const PrintConfig &config, unsigned int extruder_id, bool first_layer);
 
 PRINT_CONFIG_CLASS_DEFINE(
     SLAPrintConfig,

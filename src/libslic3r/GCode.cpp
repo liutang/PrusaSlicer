@@ -1139,6 +1139,15 @@ void GCodeGenerator::_do_export(Print& print, GCodeOutputStream &file, Thumbnail
     // Enable passing global variables between PlaceholderParser invocations.
     m_placeholder_parser_integration.context.global_config = std::make_unique<DynamicConfig>();
     print.update_object_placeholders(m_placeholder_parser_integration.parser.config_writable(), ".gcode");
+    // On a cool plate, the bed temperatures of the custom G-codes, which usually set the bed temperature at the start of the print,
+    // are those adjusted by the cool plate offsets of the filaments.
+    if (print.config().cool_plate.value)
+        for (const bool first_layer : { true, false }) {
+            std::vector<int> temperatures((first_layer ? print.config().first_layer_bed_temperature : print.config().bed_temperature).size());
+            for (size_t extruder_id = 0; extruder_id < temperatures.size(); ++ extruder_id)
+                temperatures[extruder_id] = effective_bed_temperature(print.config(), (unsigned int)extruder_id, first_layer);
+            m_placeholder_parser_integration.parser.set(first_layer ? "first_layer_bed_temperature" : "bed_temperature", new ConfigOptionInts(std::move(temperatures)));
+        }
 
     // Get optimal tool ordering to minimize tool switches of a multi-exruder print.
     // For a print by objects, find the 1st printing object.
@@ -1941,7 +1950,7 @@ std::string GCodeGenerator::_process_start_gcode(const Print& print, unsigned in
     const int num_extruders            = print.config().nozzle_diameter.values.size();
     const int bed_temperature_extruder = print.config().bed_temperature_extruder;
     if (0 < bed_temperature_extruder && bed_temperature_extruder <= num_extruders) {
-        const int first_layer_bed_temperature = print.config().first_layer_bed_temperature.get_at(bed_temperature_extruder - 1);
+        const int first_layer_bed_temperature = effective_bed_temperature(print.config(), bed_temperature_extruder - 1, true);
         DynamicConfig config;
         config.set_key_value("first_layer_bed_temperature", new ConfigOptionInts(num_extruders, first_layer_bed_temperature));
         return this->placeholder_parser_process("start_gcode", print.config().start_gcode.value, current_extruder_id, &config);
@@ -1962,7 +1971,7 @@ void GCodeGenerator::_print_first_layer_bed_temperature(GCodeOutputStream &file,
     const bool use_first_printing_extruder = bed_temperature_extruder <= 0 || bed_temperature_extruder > num_extruders;
 
     // Initial bed temperature based on the first printing extruder or based on the extruded in bed_temperature_extruder.
-    int temp = print.config().first_layer_bed_temperature.get_at(use_first_printing_extruder ? first_printing_extruder_id : bed_temperature_extruder - 1);
+    int temp = effective_bed_temperature(print.config(), use_first_printing_extruder ? first_printing_extruder_id : bed_temperature_extruder - 1, true);
 
     // Is the bed temperature set by the provided custom G-code?
     int  temp_by_gcode     = -1;
@@ -2719,7 +2728,7 @@ LayerResult GCodeGenerator::process_layer(
         const int  num_extruders            = print.config().nozzle_diameter.values.size();
         const int  bed_temperature_extruder = print.config().bed_temperature_extruder;
         const bool use_first_extruder       = bed_temperature_extruder <= 0 || bed_temperature_extruder > num_extruders;
-        const int  bed_temperature          = print.config().bed_temperature.get_at(use_first_extruder ? first_extruder_id : bed_temperature_extruder - 1);
+        const int  bed_temperature          = effective_bed_temperature(print.config(), use_first_extruder ? first_extruder_id : bed_temperature_extruder - 1, false);
         gcode += m_writer.set_bed_temperature(bed_temperature);
 
         // Mark the temperature transition from 1st to 2nd layer to be finished.
