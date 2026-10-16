@@ -1252,7 +1252,8 @@ indexed_triangle_set make_logo(double height)
 namespace {
 
 // The line and the pattern tests are drawn by custom G-code only, while the slicer needs an object to print.
-// Thus start the project with a small PrusaSlicer logo next to the top left corner of the test, which is printed after the test.
+// Thus start the project with a small PrusaSlicer logo next to the top right corner of the test, which is printed after the test.
+// The logo can not be printed first, as the custom G-code of a layer is emitted before the extrusions of the layer.
 // Returns false if the user canceled creating of the new project.
 bool start_drawn_test_project(const wxString &name, int extruder, const BoundingBoxf &bed, const Vec2d &test_size, double logo_height, double layer_height)
 {
@@ -1261,9 +1262,10 @@ bool start_drawn_test_project(const wxString &name, int extruder, const Bounding
     TriangleMesh logo(make_logo(logo_height));
     {
         const BoundingBoxf3 bbox = logo.bounding_box();
-        // Left of the test if it fits the bed, right of it otherwise.
-        const bool   fits_left = test_min.x() - logo_gap - bbox.size().x() >= bed.min.x() + 2.;
-        const double min_x     = fits_left ? test_min.x() - logo_gap - bbox.size().x() : test_min.x() + test_size.x() + logo_gap;
+        // Right of the test if it fits the bed, left of it otherwise. Both tests end at their top right corner,
+        // so that the nozzle does not travel over the test to the logo.
+        const bool   fits_right = test_min.x() + test_size.x() + logo_gap + bbox.size().x() <= bed.max.x() - 2.;
+        const double min_x      = fits_right ? test_min.x() + test_size.x() + logo_gap : test_min.x() - logo_gap - bbox.size().x();
         // Aligned with the top of the test.
         logo.translate(float(min_x - bbox.min.x()), float(test_min.y() + test_size.y() - bbox.max.y()), 0.f);
     }
