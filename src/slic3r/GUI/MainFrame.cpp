@@ -1414,26 +1414,70 @@ static wxMenu* generate_help_menu()
     return helpMenu;
 }
 
-static void add_common_view_menu_items(wxMenu* view_menu, MainFrame* mainFrame, std::function<bool(void)> can_change_view)
+static bool number_keys_select_tool()
 {
-    // The camera control accelerators are captured by GLCanvas3D::on_char().
-    append_menu_item(view_menu, wxID_ANY, _L("Iso") + sep + "&0", _L("Iso View"), [mainFrame](wxCommandEvent&) { mainFrame->select_view("iso"); },
-        "", nullptr, [can_change_view]() { return can_change_view(); }, mainFrame);
-    view_menu->AppendSeparator();
-    //TRN Main menu: View->Top 
-    append_menu_item(view_menu, wxID_ANY, _L("Top") + sep + "&1", _L("Top View"), [mainFrame](wxCommandEvent&) { mainFrame->select_view("top"); },
-        "", nullptr, [can_change_view]() { return can_change_view(); }, mainFrame);
-    //TRN Main menu: View->Bottom 
-    append_menu_item(view_menu, wxID_ANY, _L("Bottom") + sep + "&2", _L("Bottom View"), [mainFrame](wxCommandEvent&) { mainFrame->select_view("bottom"); },
-        "", nullptr, [can_change_view]() { return can_change_view(); }, mainFrame);
-    append_menu_item(view_menu, wxID_ANY, _L("Front") + sep + "&3", _L("Front View"), [mainFrame](wxCommandEvent&) { mainFrame->select_view("front"); },
-        "", nullptr, [can_change_view]() { return can_change_view(); }, mainFrame);
-    append_menu_item(view_menu, wxID_ANY, _L("Rear") + sep + "&4", _L("Rear View"), [mainFrame](wxCommandEvent&) { mainFrame->select_view("rear"); },
-        "", nullptr, [can_change_view]() { return can_change_view(); }, mainFrame);
-    append_menu_item(view_menu, wxID_ANY, _L("Left") + sep + "&5", _L("Left View"), [mainFrame](wxCommandEvent&) { mainFrame->select_view("left"); },
-        "", nullptr, [can_change_view]() { return can_change_view(); }, mainFrame);
-    append_menu_item(view_menu, wxID_ANY, _L("Right") + sep + "&6", _L("Right View"), [mainFrame](wxCommandEvent&) { mainFrame->select_view("right"); },
-        "", nullptr, [can_change_view]() { return can_change_view(); }, mainFrame);
+    return wxGetApp().app_config->get_bool("number_keys_select_tool");
+}
+
+// Shortcut of a camera view shown by the View menu.
+static wxString view_menu_shortcut(char digit)
+{
+    // If the number keys select the camera views, they are captured by GLCanvas3D::on_char() and the menu only shows them.
+    // Otherwise the camera views are selected by Ctrl + number, as in OrcaSlicer.
+    return number_keys_select_tool() ? wxString("\tCtrl+") + digit : sep + "&" + digit;
+}
+
+// Shortcut of a tab of the Window menu. If the number keys select the tool, Ctrl + number selects the camera views,
+// thus the tabs are selected by Ctrl + Option + number on macOS and by Ctrl + Shift + number on the other systems.
+// (Cmd + Shift + number takes screenshots on macOS, Ctrl + Alt acts as AltGr with many keyboard layouts on Windows.)
+static wxString tab_menu_shortcut(char digit)
+{
+    if (! number_keys_select_tool())
+        return wxString("\tCtrl+") + digit;
+#ifdef __APPLE__
+    return wxString("\tCtrl+Alt+") + digit;
+#else
+    return wxString("\tCtrl+Shift+") + digit;
+#endif
+}
+
+template<typename Item>
+static void add_common_view_menu_items(wxMenu* view_menu, MainFrame* mainFrame, std::function<bool(void)> can_change_view, std::vector<Item> &view_menu_items)
+{
+    struct View {
+        wxString    label;
+        wxString    tooltip;
+        const char *name;
+        char        digit;
+    };
+    const View views[] = {
+        { _L("Iso"),    _L("Iso View"),    "iso",    '0' },
+        //TRN Main menu: View->Top 
+        { _L("Top"),    _L("Top View"),    "top",    '1' },
+        //TRN Main menu: View->Bottom 
+        { _L("Bottom"), _L("Bottom View"), "bottom", '2' },
+        { _L("Front"),  _L("Front View"),  "front",  '3' },
+        { _L("Rear"),   _L("Rear View"),   "rear",   '4' },
+        { _L("Left"),   _L("Left View"),   "left",   '5' },
+        { _L("Right"),  _L("Right View"),  "right",  '6' },
+    };
+    for (const View &view : views) {
+        const std::string name = view.name;
+        wxMenuItem *item = append_menu_item(view_menu, wxID_ANY, view.label + view_menu_shortcut(view.digit), view.tooltip,
+            [mainFrame, name](wxCommandEvent&) { mainFrame->select_view(name); },
+            "", nullptr, [can_change_view]() { return can_change_view(); }, mainFrame);
+        view_menu_items.push_back({ item, view.label, view.digit });
+        if (view.digit == '0')
+            view_menu->AppendSeparator();
+    }
+}
+
+void MainFrame::update_number_key_shortcuts()
+{
+    for (const NumberKeyMenuItem &item : m_view_menu_items)
+        item.item->SetItemLabel(item.label + view_menu_shortcut(item.digit));
+    for (const NumberKeyMenuItem &item : m_tab_menu_items)
+        item.item->SetItemLabel(item.label + tab_menu_shortcut(item.digit));
 }
 
 void MainFrame::init_menubar_as_editor()
@@ -1441,6 +1485,8 @@ void MainFrame::init_menubar_as_editor()
 #ifdef __APPLE__
     wxMenuBar::SetAutoWindowMenu(false);
 #endif
+    m_view_menu_items.clear();
+    m_tab_menu_items.clear();
 
     // File menu
     wxMenu* fileMenu = new wxMenu;
@@ -1668,30 +1714,36 @@ void MainFrame::init_menubar_as_editor()
     auto windowMenu = new wxMenu();
     {
         if (m_plater) {
-            append_menu_item(windowMenu, wxID_HIGHEST + 1, _L("&Plater Tab") + "\tCtrl+1", _L("Show the plater"),
+            wxMenuItem* item_plater_tab = append_menu_item(windowMenu, wxID_HIGHEST + 1, _L("&Plater Tab") + tab_menu_shortcut('1'), _L("Show the plater"),
                 [this](wxCommandEvent&) { select_tab(size_t(0)); }, "plater", nullptr,
                 []() {return true; }, this);
+            m_tab_menu_items.push_back({ item_plater_tab, _L("&Plater Tab"), '1' });
             windowMenu->AppendSeparator();
         }
-        append_menu_item(windowMenu, wxID_HIGHEST + 2, _L("P&rint Settings Tab") + "\tCtrl+2", _L("Show the print settings"),
+        wxMenuItem* item_print_tab = append_menu_item(windowMenu, wxID_HIGHEST + 2, _L("P&rint Settings Tab") + tab_menu_shortcut('2'), _L("Show the print settings"),
             [this/*, tab_offset*/](wxCommandEvent&) { select_tab(1); }, "cog", nullptr,
             []() {return true; }, this);
-        wxMenuItem* item_material_tab = append_menu_item(windowMenu, wxID_HIGHEST + 3, _L("&Filament Settings Tab") + "\tCtrl+3", _L("Show the filament settings"),
+        m_tab_menu_items.push_back({ item_print_tab, _L("P&rint Settings Tab"), '2' });
+        wxMenuItem* item_material_tab = append_menu_item(windowMenu, wxID_HIGHEST + 3, _L("&Filament Settings Tab") + tab_menu_shortcut('3'), _L("Show the filament settings"),
             [this/*, tab_offset*/](wxCommandEvent&) { select_tab(2); }, "spool", nullptr,
             []() {return true; }, this);
         m_changeable_menu_items.push_back(item_material_tab);
-        wxMenuItem* item_printer_tab = append_menu_item(windowMenu, wxID_HIGHEST + 4, _L("Print&er Settings Tab") + "\tCtrl+4", _L("Show the printer settings"),
+        m_tab_menu_items.push_back({ item_material_tab, _L("&Filament Settings Tab"), '3' });
+        wxMenuItem* item_printer_tab = append_menu_item(windowMenu, wxID_HIGHEST + 4, _L("Print&er Settings Tab") + tab_menu_shortcut('4'), _L("Show the printer settings"),
             [this/*, tab_offset*/](wxCommandEvent&) { select_tab(3); }, "printer", nullptr,
             []() {return true; }, this);
         m_changeable_menu_items.push_back(item_printer_tab);
+        m_tab_menu_items.push_back({ item_printer_tab, _L("Print&er Settings Tab"), '4' });
         if (m_plater) {
             windowMenu->AppendSeparator();
-            append_menu_item(windowMenu, wxID_HIGHEST + 5, _L("3&D") + "\tCtrl+5", _L("Show the 3D editing view"),
+            wxMenuItem* item_3d = append_menu_item(windowMenu, wxID_HIGHEST + 5, _L("3&D") + tab_menu_shortcut('5'), _L("Show the 3D editing view"),
                 [this](wxCommandEvent&) { m_plater->select_view_3D("3D"); }, "editor_menu", nullptr,
                 [this](){return can_change_view(); }, this);
-            append_menu_item(windowMenu, wxID_HIGHEST + 6, _L("Pre&view") + "\tCtrl+6", _L("Show the 3D slices preview"),
+            m_tab_menu_items.push_back({ item_3d, _L("3&D"), '5' });
+            wxMenuItem* item_preview = append_menu_item(windowMenu, wxID_HIGHEST + 6, _L("Pre&view") + tab_menu_shortcut('6'), _L("Show the 3D slices preview"),
                 [this](wxCommandEvent&) { m_plater->select_view_3D("Preview"); }, "preview_menu", nullptr,
                 [this](){return can_change_view(); }, this);
+            m_tab_menu_items.push_back({ item_preview, _L("Pre&view"), '6' });
         }
 
         windowMenu->AppendSeparator();
@@ -1722,7 +1774,7 @@ void MainFrame::init_menubar_as_editor()
     wxMenu* viewMenu = nullptr;
     if (m_plater) {
         viewMenu = new wxMenu();
-        add_common_view_menu_items(viewMenu, this, std::bind(&MainFrame::can_change_view, this));
+        add_common_view_menu_items(viewMenu, this, std::bind(&MainFrame::can_change_view, this), m_view_menu_items);
         viewMenu->AppendSeparator();
         append_menu_check_item(viewMenu, wxID_ANY, _L("Show &Labels") + sep + "E", _L("Show object/instance labels in 3D scene"),
             [this](wxCommandEvent&) { m_plater->show_view3D_labels(!m_plater->are_view3D_labels_shown()); }, this,
@@ -1821,6 +1873,8 @@ void MainFrame::open_menubar_item(const wxString& menu_name,const wxString& item
 
 void MainFrame::init_menubar_as_gcodeviewer()
 {
+    m_view_menu_items.clear();
+    m_tab_menu_items.clear();
     wxMenu* fileMenu = new wxMenu;
     {
         append_menu_item(fileMenu, wxID_ANY, _L("&Open G-code") + dots + "\tCtrl+O", _L("Open a G-code file"),
@@ -1858,7 +1912,7 @@ void MainFrame::init_menubar_as_gcodeviewer()
     wxMenu* viewMenu = nullptr;
     if (m_plater != nullptr) {
         viewMenu = new wxMenu();
-        add_common_view_menu_items(viewMenu, this, std::bind(&MainFrame::can_change_view, this));
+        add_common_view_menu_items(viewMenu, this, std::bind(&MainFrame::can_change_view, this), m_view_menu_items);
         viewMenu->AppendSeparator();
         append_menu_check_item(viewMenu, wxID_ANY, _L("Show Legen&d") + sep + "L", _L("Show legend"),
             [this](wxCommandEvent&) { m_plater->show_legend(!m_plater->is_legend_shown()); }, this,
@@ -1891,7 +1945,11 @@ void MainFrame::update_menubar()
     m_changeable_menu_items[miExport]       ->SetItemLabel((is_fff ? _L("Export &G-code")         : _L("E&xport"))        + dots    + "\tCtrl+G");
     m_changeable_menu_items[miSend]         ->SetItemLabel((is_fff ? _L("S&end G-code")           : _L("S&end to print")) + dots    + "\tCtrl+Shift+G");
 
-    m_changeable_menu_items[miMaterialTab]  ->SetItemLabel((is_fff ? _L("&Filament Settings Tab") : _L("Mate&rial Settings Tab"))   + "\tCtrl+3");
+    const wxString material_tab_label = is_fff ? _L("&Filament Settings Tab") : _L("Mate&rial Settings Tab");
+    m_changeable_menu_items[miMaterialTab]  ->SetItemLabel(material_tab_label + tab_menu_shortcut('3'));
+    for (NumberKeyMenuItem &item : m_tab_menu_items)
+        if (item.item == m_changeable_menu_items[miMaterialTab])
+            item.label = material_tab_label;
     m_changeable_menu_items[miMaterialTab]  ->SetBitmap(*get_bmp_bundle(is_fff ? "spool"   : "resin"));
 
     m_changeable_menu_items[miPrinterTab]   ->SetBitmap(*get_bmp_bundle(is_fff ? "printer" : "sla_printer"));

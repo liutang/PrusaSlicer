@@ -84,6 +84,15 @@ void KBShortcutsDialog::fill_shortcuts()
 {
     const std::string& ctrl = GUI::shortkey_ctrl_prefix();
     const std::string& alt = GUI::shortkey_alt_prefix();
+    // If the number keys select the tool, Ctrl + number selects the camera views and the tabs are selected
+    // by Ctrl + Option + number on macOS and by Ctrl + Shift + number on the other systems.
+    const bool        number_keys_select_tool = wxGetApp().app_config->get_bool("number_keys_select_tool");
+#ifdef __APPLE__
+    const std::string tab  = number_keys_select_tool ? ctrl + alt : ctrl;
+#else
+    const std::string tab  = number_keys_select_tool ? ctrl + "Shift+" : ctrl;
+#endif
+    const std::string view = number_keys_select_tool ? ctrl : std::string();
 
     if (wxGetApp().is_editor()) {
         Shortcuts commands_shortcuts = {
@@ -119,16 +128,16 @@ void KBShortcutsDialog::fill_shortcuts()
 #endif // __APPLE__
             { ctrl + "F", L("Search") },
             // Window
-            { ctrl + "1", L("Select Plater Tab") },
-            { ctrl + "2", L("Select Print Settings Tab") },
-            { ctrl + "3", L("Select Filament Settings Tab") },
-            { ctrl + "4", L("Select Printer Settings Tab") },
-            { ctrl + "5", L("Switch to 3D") },
-            { ctrl + "6", L("Switch to Preview") },
+            { tab + "1", L("Select Plater Tab") },
+            { tab + "2", L("Select Print Settings Tab") },
+            { tab + "3", L("Select Filament Settings Tab") },
+            { tab + "4", L("Select Printer Settings Tab") },
+            { tab + "5", L("Switch to 3D") },
+            { tab + "6", L("Switch to Preview") },
             { ctrl + "J", L("Print host upload queue") },
             { ctrl + "Shift+" + "I", L("Open new instance") },
             // View
-            { "0-6", L("Camera view") },
+            { view + "0-6", L("Camera view") },
             { "E", L("Show/Hide object/instance labels") },
             // Configuration
 #ifdef __APPLE__
@@ -189,6 +198,9 @@ void KBShortcutsDialog::fill_shortcuts()
 #endif // __APPLE__
 #endif // _WIN32
         };
+
+        if (number_keys_select_tool)
+            plater_shortcuts.push_back({ "0-9", L("Set the tool of the selected objects and parts, 0 sets the default tool") });
 
         m_full_shortcuts.push_back({ { _L("Plater"), "" }, plater_shortcuts });
 

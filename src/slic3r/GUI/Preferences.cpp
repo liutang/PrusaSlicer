@@ -20,6 +20,7 @@
 #include "OG_CustomCtrl.hpp"
 #include "GLCanvas3D.hpp"
 #include "ConfigWizard.hpp"
+#include "MainFrame.hpp"
 #include "Search.hpp"
 
 #include "Widgets/SpinInput.hpp"
@@ -483,6 +484,14 @@ void PreferencesDialog::build()
 		L("If enabled, reverses the direction of zoom with mouse wheel"),
 		app_config->get_bool("reverse_mouse_wheel_zoom"));
 
+	append_bool_option(m_optgroup_camera, "number_keys_select_tool",
+		L("Number keys change the tool instead of the camera view"),
+		L("If enabled, the number keys set the tool of the selected objects and parts, 0 sets the default tool, as in OrcaSlicer. "
+		  "The camera views are then selected by Ctrl + number (Cmd + number on macOS) and the tabs "
+		  "by Ctrl + Shift + number (Cmd + Option + number on macOS).\n"
+		  "If disabled, the number keys select the camera views and Ctrl + number selects the tabs."),
+		app_config->get_bool("number_keys_select_tool"));
+
 	activate_options_tab(m_optgroup_camera);
 
 	// Add "GUI" tab
@@ -808,6 +817,9 @@ void PreferencesDialog::accept(wxEvent&)
 
 	for (std::map<std::string, std::string>::iterator it = m_values.begin(); it != m_values.end(); ++it)
 		app_config->set(it->first, it->second);
+
+	if (m_values.find("number_keys_select_tool") != m_values.end() && wxGetApp().mainframe != nullptr)
+		wxGetApp().mainframe->update_number_key_shortcuts();
 
 	if (wxGetApp().is_editor()) {
 		wxGetApp().set_label_clr_sys(m_sys_colour->GetColour());
