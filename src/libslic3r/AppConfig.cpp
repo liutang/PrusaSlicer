@@ -191,6 +191,11 @@ void AppConfig::set_defaults()
     if (get("reverse_mouse_wheel_zoom").empty())
         set("reverse_mouse_wheel_zoom", "0");
 
+    // If enabled, the number keys set the tool of the selected objects and parts, as in OrcaSlicer,
+    // and the camera views are selected by Ctrl + number. Otherwise the number keys select the camera views.
+    if (get("number_keys_select_tool").empty())
+        set("number_keys_select_tool", "0");
+
     if (get("show_splash_screen").empty())
         set("show_splash_screen", "1");
 

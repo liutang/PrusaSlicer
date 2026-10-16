@@ -146,6 +146,17 @@ class MainFrame : public DPIFrame
     // vector of a MenuBar items changeable in respect to printer technology 
     std::vector<wxMenuItem*> m_changeable_menu_items;
 
+    // Menu items of the camera views and of the tabs. Their shortcuts depend on whether the number keys
+    // select the camera views or the tool, see the "number_keys_select_tool" preference.
+    struct NumberKeyMenuItem {
+        wxMenuItem *item;
+        // Label without the shortcut.
+        wxString    label;
+        char        digit;
+    };
+    std::vector<NumberKeyMenuItem> m_view_menu_items;
+    std::vector<NumberKeyMenuItem> m_tab_menu_items;
+
     wxFileHistory m_recent_projects;
 
     enum class ESettingsLayout
@@ -189,6 +200,8 @@ public:
     void        init_menubar_as_editor();
     void        init_menubar_as_gcodeviewer();
     void        update_menubar();
+    // Update the shortcuts shown by the View and Window menus after the "number_keys_select_tool" preference changed.
+    void        update_number_key_shortcuts();
     // Open item in menu by menu and item name (in actual language)
     void        open_menubar_item(const wxString& menu_name,const wxString& item_name);
     void        update_ui_from_settings();
