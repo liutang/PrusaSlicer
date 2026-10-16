@@ -61,7 +61,7 @@ FreqChangedParams::FreqChangedParams(wxWindow* parent)
         Tab* tab_print = wxGetApp().get_tab(Preset::TYPE_PRINT);
         if (!tab_print) return;
 
-        if (opt_key == "fill_density") {
+        if (opt_key == "fill_density" || opt_key == "cool_plate") {
             tab_print->update_dirty();
             tab_print->reload_config();
             tab_print->update();
@@ -160,6 +160,11 @@ FreqChangedParams::FreqChangedParams(wxWindow* parent)
     def.gui_type = ConfigOptionDef::GUIType::undefined;
     def.set_default_value(new ConfigOptionBool{ m_brim_width > 0.0 ? true : false });
     option = Option(def, "brim");
+    option.opt.sidetext = "";
+    line.append_option(option);
+
+    // The bed temperatures of the filaments are adjusted by their cool plate offsets if checked.
+    option = m_og_fff->get_option("cool_plate");
     option.opt.sidetext = "";
     line.append_option(option);
 

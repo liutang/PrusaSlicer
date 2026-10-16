@@ -88,6 +88,8 @@ bool Print::invalidate_state_by_config_options(const ConfigOptionResolver & /* n
         "bed_shape",
         "bed_temperature",
         "before_layer_gcode",
+        "cool_plate",
+        "cool_plate_bed_temperature_offset",
         "between_objects_gcode",
         "binary_gcode",
         "bridge_acceleration",
@@ -460,8 +462,8 @@ std::string Print::validate(std::vector<std::string>* warnings) const
         if (m_config.bed_temperature_extruder == 0) {
             for (size_t a = 0; a < extruders.size(); ++a) {
                 for (size_t b = a + 1; b < extruders.size(); ++b) {
-                    if (std::abs(m_config.bed_temperature.get_at(extruders[a]) - m_config.bed_temperature.get_at(extruders[b])) > 15
-                     || std::abs(m_config.first_layer_bed_temperature.get_at(extruders[a]) - m_config.first_layer_bed_temperature.get_at(extruders[b])) > 15) {
+                    if (std::abs(effective_bed_temperature(m_config, extruders[a], false) - effective_bed_temperature(m_config, extruders[b], false)) > 15
+                     || std::abs(effective_bed_temperature(m_config, extruders[a], true) - effective_bed_temperature(m_config, extruders[b], true)) > 15) {
                         warnings->emplace_back("_BED_TEMPS_DIFFER");
                         goto DONE;
                     }
