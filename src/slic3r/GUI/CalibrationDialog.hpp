@@ -43,6 +43,8 @@ private:
     ::TextInput *m_start         { nullptr };
     ::TextInput *m_end           { nullptr };
     ::CheckBox  *m_scale         { nullptr };
+    // The temperature ranges of "Load Optimized Defaults" are used for the filament types.
+    bool         m_optimized     { false };
 };
 
 // Parameters of the maximum volumetric speed calibration. Adapted from OrcaSlicer.
@@ -108,6 +110,8 @@ private:
     ::TextInput *m_step     { nullptr };
     ::TextInput *m_speed    { nullptr };
     ::CheckBox  *m_numbers  { nullptr };
+    // The defaults of "Load Optimized Defaults" are used.
+    bool         m_optimized { false };
 };
 
 // Parameters of the flow ratio calibration. Adapted from OrcaSlicer.
@@ -117,7 +121,8 @@ public:
     explicit FlowRatioDialog(wxWindow *parent);
 
     // Pass1 and Pass2 change the flow by percents, the "YOLO" tests of OrcaSlicer change the flow ratio by absolute steps.
-    enum class Test { Pass1, Pass2, Yolo, YoloPerfectionist };
+    // YoloQuick prints the tiles of the YOLO test from -0.03 to +0.03 only.
+    enum class Test { Pass1, Pass2, YoloQuick, Yolo, YoloPerfectionist };
 
     Test test() const;
     // Top surface pattern of the tiles: true for Archimedean chords, false for monotonic.

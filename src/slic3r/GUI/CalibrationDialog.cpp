@@ -3,6 +3,7 @@
 #include "CalibrationDialog.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
@@ -11,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#include <wx/button.h>
 #include <wx/radiobut.h>
 #include <wx/statbox.h>
 #include <wx/sizer.h>
@@ -59,18 +61,21 @@ struct FilamentTypeRange
     const char *name;
     int         start;
     int         end;
+    // The range of "Load Optimized Defaults", which takes less time to print.
+    int         optimized_start;
+    int         optimized_end;
 };
 
 // The last item stands for custom temperatures.
 const std::vector<FilamentTypeRange> filament_type_ranges {
-    { "PLA",     230, 190 },
-    { "PETG",    250, 230 },
-    { "ABS/ASA", 270, 230 },
-    { "PCTG",    280, 240 },
-    { "FLEX",    240, 210 },
-    { "PA-CF",   320, 280 },
-    { "PET-CF",  320, 280 },
-    { nullptr,   230, 190 }
+    { "PLA",     230, 190, 230, 215 },
+    { "PETG",    250, 230, 250, 235 },
+    { "ABS/ASA", 270, 230, 270, 230 },
+    { "PCTG",    280, 240, 280, 240 },
+    { "FLEX",    240, 210, 240, 210 },
+    { "PA-CF",   320, 280, 320, 280 },
+    { "PET-CF",  320, 280, 320, 280 },
+    { nullptr,   230, 190, 230, 190 }
 };
 
 int round_to_step(int temperature)
@@ -136,11 +141,20 @@ wxStaticBoxSizer* create_group(wxWindow *parent, const wxString &title)
     return new wxStaticBoxSizer(box, wxVERTICAL);
 }
 
-// A separator line and the OK / Cancel buttons at the bottom of a dialog.
-void add_buttons(wxDialog *dialog, wxSizer *top_sizer, int em)
+// A separator line, the "Load Optimized Defaults" button and the OK / Cancel buttons at the bottom of a dialog.
+// The optimized defaults test a narrower range, which is enough for most filaments and takes less time to print.
+void add_buttons(wxDialog *dialog, wxSizer *top_sizer, int em, const std::function<void()> &load_optimized_defaults)
 {
     top_sizer->Add(new StaticLine(dialog), 0, wxEXPAND | wxLEFT | wxRIGHT, em);
-    top_sizer->Add(dialog->CreateStdDialogButtonSizer(wxOK | wxCANCEL), 0, wxEXPAND | wxALL, em);
+    auto *row = new wxBoxSizer(wxHORIZONTAL);
+    auto *button = new wxButton(dialog, wxID_ANY, _L("Load Optimized Defaults"));
+    wxGetApp().SetWindowVariantForButton(button);
+    button->SetToolTip(_L("Test a narrower range, which is enough for most filaments and takes less time to print."));
+    button->Bind(wxEVT_BUTTON, [load_optimized_defaults](wxCommandEvent&) { load_optimized_defaults(); });
+    row->Add(button, 0, wxALIGN_CENTER_VERTICAL);
+    row->AddStretchSpacer();
+    row->Add(dialog->CreateStdDialogButtonSizer(wxOK | wxCANCEL), 0, wxALIGN_CENTER_VERTICAL);
+    top_sizer->Add(row, 0, wxEXPAND | wxALL, em);
 }
 
 // Load a calibration model from the resources, center it in XY and put it on the Z = 0 plane.
@@ -319,7 +333,10 @@ TempTowerDialog::TempTowerDialog(wxWindow *parent)
     auto *top_sizer = new wxBoxSizer(wxVERTICAL);
     top_sizer->Add(grid, 0, wxEXPAND | wxALL, 2 * em);
     top_sizer->Add(m_scale, 0, wxLEFT | wxRIGHT | wxBOTTOM, 2 * em);
-    add_buttons(this, top_sizer, em);
+    add_buttons(this, top_sizer, em, [this]() {
+        m_optimized = true;
+        this->apply_filament_type();
+    });
 
     m_filament_type->Bind(wxEVT_COMBOBOX, [this](wxCommandEvent&) { this->apply_filament_type(); });
     m_extruder->Bind(wxEVT_COMBOBOX, [this](wxCommandEvent&) { this->select_filament_type_for_extruder(); });
@@ -377,8 +394,9 @@ void TempTowerDialog::apply_filament_type()
     const int selection = m_filament_type->GetSelection();
     if (selection >= 0 && selection + 1 < int(filament_type_ranges.size())) {
         // Set without emitting the events, which switch the filament type to custom.
-        set_number(m_start, filament_type_ranges[selection].start);
-        set_number(m_end, filament_type_ranges[selection].end);
+        const FilamentTypeRange &range = filament_type_ranges[selection];
+        set_number(m_start, m_optimized ? range.optimized_start : range.start);
+        set_number(m_end, m_optimized ? range.optimized_end : range.end);
     }
 }
 
@@ -532,7 +550,11 @@ MaxVolumetricSpeedDialog::MaxVolumetricSpeedDialog(wxWindow *parent)
 
     auto *top_sizer = new wxBoxSizer(wxVERTICAL);
     top_sizer->Add(grid, 0, wxEXPAND | wxALL, 2 * em);
-    add_buttons(this, top_sizer, em);
+    add_buttons(this, top_sizer, em, [this]() {
+        set_number(m_start, 15.);
+        set_number(m_end, 30.);
+        set_number(m_step, 0.5);
+    });
 
     Bind(wxEVT_BUTTON, [this](wxCommandEvent &evt) {
         // The comparisons are false for a field not holding a number.
@@ -602,11 +624,16 @@ void calibrate_max_volumetric_speed()
     TriangleMesh mesh;
     try {
         mesh = load_calibration_mesh("volumetric_speed/SpeedTestStructure.3mf");
-        // Fit the object to a narrow bed.
-        const BoundingBoxf3 bbox = mesh.bounding_box();
-        const double bed_width = plater->build_volume().bounding_volume2d().size().x();
-        if (const double scale = (bed_width - 10.) / bbox.size().x(); scale > 0. && scale < 1.)
-            mesh.scale(Vec3f(float(scale), 1.f, 1.f));
+        // Fit the object to a small bed, such as the one of the Prusa MINI. The brim of 5 mm is printed outside of the wall,
+        // thus keep the wall 5 mm plus a margin of 5 mm away from the edges of the bed. OrcaSlicer only keeps 5 mm,
+        // with which the brim reaches the edges of the bed.
+        const BoundingBoxf3 bbox     = mesh.bounding_box();
+        const Vec2d         bed_size = plater->build_volume().bounding_volume2d().size();
+        const double        border   = 2. * (5. + 5.);
+        const double        scale_x  = (bed_size.x() - border) / bbox.size().x();
+        const double        scale_y  = (bed_size.y() - border) / bbox.size().y();
+        if ((scale_x > 0. && scale_x < 1.) || (scale_y > 0. && scale_y < 1.))
+            mesh.scale(Vec3f(float(scale_x > 0. && scale_x < 1. ? scale_x : 1.), float(scale_y > 0. && scale_y < 1. ? scale_y : 1.), 1.f));
         if (height < bbox.size().z() - EPSILON) {
             indexed_triangle_set lower;
             cut_mesh(mesh.its, float(height), nullptr, &lower);
@@ -676,6 +703,8 @@ void calibrate_max_volumetric_speed()
         new_config.set_key_value("thin_walls", new ConfigOptionBool(false));
         // A draft shield would switch Spiral Vase mode off.
         new_config.set_key_value("draft_shield", new ConfigOptionEnum<DraftShield>(dsDisabled));
+        // No skirt, it would be printed around the brim and could leave a small bed. The brim primes the nozzle.
+        new_config.set_key_value("skirts", new ConfigOptionInt(0));
         new_config.set_key_value("first_layer_height", new ConfigOptionFloatOrPercent(layer_height, false));
         new_config.set_key_value("max_volumetric_speed", new ConfigOptionFloat(0.));
         new_config.set_key_value("max_volumetric_extrusion_rate_slope_positive", new ConfigOptionFloat(0.));
@@ -763,7 +792,10 @@ PressureAdvanceDialog::PressureAdvanceDialog(wxWindow *parent)
     top_sizer->Add(extruder_types, 0, wxEXPAND | wxALL, 2 * em);
     top_sizer->Add(methods, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 2 * em);
     top_sizer->Add(settings, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 2 * em);
-    add_buttons(this, top_sizer, em);
+    add_buttons(this, top_sizer, em, [this]() {
+        m_optimized = true;
+        this->reset_params();
+    });
 
     for (wxRadioButton *radio : m_extruder_types)
         radio->Bind(wxEVT_RADIOBUTTON, [this](wxCommandEvent&) { this->reset_params(); });
@@ -796,7 +828,7 @@ void PressureAdvanceDialog::reset_params()
     const bool   dde    = m_extruder_types.front()->GetValue();
     const Method method = this->method();
     set_number(m_start, 0.);
-    set_number(m_end,  ! dde ? 1. : method == Method::Pattern ? 0.08 : 0.1);
+    set_number(m_end,  ! dde ? 1. : method == Method::Pattern ? 0.08 : m_optimized ? 0.06 : 0.1);
     set_number(m_step, method == Method::Pattern ? (dde ? 0.005 : 0.05) : (dde ? 0.002 : 0.02));
     // The numbers are optional for the lines only: the tower has none, the pattern always has them.
     m_numbers->SetValue(method != Method::Tower);
@@ -1507,13 +1539,13 @@ FlowRatioDialog::FlowRatioDialog(wxWindow *parent)
 
     // The layout and the defaults follow the flow ratio calibration dialog of OrcaSlicer.
     auto *tests = create_group(this, _L("Calibration Test Type"));
-    for (const wxString &label : { _L("Pass 1 (Coarse)"), _L("Pass 2 (Fine)"), _L("YOLO (Recommended)"), _L("YOLO (Perfectionist)") }) {
+    for (const wxString &label : { _L("Pass 1 (Coarse)"), _L("Pass 2 (Fine)"), _L("YOLO (Quick)"), _L("YOLO (Recommended)"), _L("YOLO (Perfectionist)") }) {
         auto *radio = new wxRadioButton(tests->GetStaticBox(), wxID_ANY, label, wxDefaultPosition, wxDefaultSize, m_tests.empty() ? wxRB_GROUP : 0);
         tests->Add(radio, 0, wxLEFT | wxRIGHT | wxTOP, em);
         m_tests.emplace_back(radio);
     }
     tests->AddSpacer(em);
-    m_tests[size_t(Test::Yolo)]->SetValue(true);
+    m_tests[size_t(Test::YoloQuick)]->SetValue(true);
 
     auto *settings = create_group(this, _L("Settings"));
     auto *grid = new wxFlexGridSizer(2, em, 2 * em);
@@ -1541,7 +1573,7 @@ FlowRatioDialog::FlowRatioDialog(wxWindow *parent)
     auto *top_sizer = new wxBoxSizer(wxVERTICAL);
     top_sizer->Add(tests, 0, wxEXPAND | wxALL, 2 * em);
     top_sizer->Add(settings, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 2 * em);
-    add_buttons(this, top_sizer, em);
+    add_buttons(this, top_sizer, em, [this]() { m_tests[size_t(Test::YoloQuick)]->SetValue(true); });
 
     SetSizerAndFit(top_sizer);
     wxGetApp().UpdateDlgDarkUI(this, true);
@@ -1553,7 +1585,7 @@ FlowRatioDialog::Test FlowRatioDialog::test() const
     for (size_t i = 0; i < m_tests.size(); ++ i)
         if (m_tests[i]->GetValue())
             return Test(i);
-    return Test::Yolo;
+    return Test::YoloQuick;
 }
 bool FlowRatioDialog::archimedean_chords() const { return m_pattern->GetSelection() != 1; }
 int  FlowRatioDialog::extruder() const { return std::max(0, m_extruder->GetSelection()); }
@@ -1594,7 +1626,7 @@ void calibrate_flow_ratio()
     const double xy_scale           = nozzle_diameter / 0.6 > 1.2 ? nozzle_diameter / 0.6 : 1.;
 
     // The "YOLO" tests change the flow ratio by absolute steps, the other tests change it by percents.
-    const bool   absolute_steps     = test == Test::Yolo || test == Test::YoloPerfectionist;
+    const bool   absolute_steps     = test == Test::YoloQuick || test == Test::Yolo || test == Test::YoloPerfectionist;
     double       extrusion_multiplier = 1.;
     if (const Preset *preset = wxGetApp().preset_bundle->extruders_filaments[extruder].get_selected_preset(); preset != nullptr)
         extrusion_multiplier = preset->config.opt_float("extrusion_multiplier", 0u);
@@ -1608,7 +1640,7 @@ void calibrate_flow_ratio()
     try {
         Model model = FileReader::load_model(resources_dir() + "/calib/filament_flow/" +
             (test == Test::Pass1 ? "flowrate-test-pass1.3mf" : test == Test::Pass2 ? "flowrate-test-pass2.3mf" :
-             test == Test::Yolo  ? "Orca-LinearFlow.3mf"     : "Orca-LinearFlow_fine.3mf"));
+             test == Test::YoloPerfectionist ? "Orca-LinearFlow_fine.3mf" : "Orca-LinearFlow.3mf"));
         for (const ModelObject *model_object : model.objects) {
             const std::string prefix = "flowrate_";
             if (model_object->name.compare(0, prefix.size(), prefix) != 0)
@@ -1635,6 +1667,29 @@ void calibrate_flow_ratio()
         return;
     }
     std::sort(tiles.begin(), tiles.end(), [](const Tile &l, const Tile &r) { return l.change < r.change; });
+
+    if (test == Test::YoloQuick) {
+        // Only the tiles from -0.03 to +0.03 of the YOLO test. Their places in the layout of the YOLO test would leave gaps,
+        // thus lay them out in a Z shape, so that the tiles next to each other in flow are next to each other on the bed:
+        //                 +0.01  +0.02  +0.03
+        //                   0
+        // -0.03  -0.02  -0.01
+        tiles.erase(std::remove_if(tiles.begin(), tiles.end(), [](const Tile &tile) { return std::abs(tile.change) > 0.03 + EPSILON; }), tiles.end());
+        // Column and row of the tiles sorted by their change of flow, row zero at the front of the bed.
+        static constexpr std::array<std::pair<int, int>, 7> places { {
+            { 0, 0 }, { 1, 0 }, { 2, 0 }, { 2, 1 }, { 2, 2 }, { 3, 2 }, { 4, 2 } } };
+        Vec2d tile_size = Vec2d::Zero();
+        for (const Tile &tile : tiles)
+            tile_size = tile_size.cwiseMax(to_2d(tile.mesh.bounding_box().size()));
+        const double gap = 3.;
+        for (size_t i = 0; i < tiles.size() && i < places.size(); ++ i) {
+            Tile &tile = tiles[i];
+            const BoundingBoxf3 bbox = tile.mesh.bounding_box();
+            const double x = double(places[i].first)  * (tile_size.x() + gap);
+            const double y = double(places[i].second) * (tile_size.y() + gap);
+            tile.mesh.translate(float(x - bbox.min.x()), float(y - bbox.min.y()), 0.f);
+        }
+    }
 
     // Center the layout on the bed and scale the tiles to the nozzle.
     {
@@ -1751,7 +1806,11 @@ RetractionDialog::RetractionDialog(wxWindow *parent)
 
     auto *top_sizer = new wxBoxSizer(wxVERTICAL);
     top_sizer->Add(settings, 0, wxEXPAND | wxALL, 2 * em);
-    add_buttons(this, top_sizer, em);
+    add_buttons(this, top_sizer, em, [this]() {
+        set_number(m_start, 0.);
+        set_number(m_end, 1.);
+        set_number(m_step, 0.1);
+    });
 
     Bind(wxEVT_BUTTON, [this](wxCommandEvent &evt) {
         // The comparisons are false for a field not holding a number.
