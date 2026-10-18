@@ -12,7 +12,6 @@
 #include <string>
 #include <vector>
 
-#include <wx/button.h>
 #include <wx/radiobut.h>
 #include <wx/statbox.h>
 #include <wx/sizer.h>
@@ -141,17 +140,21 @@ wxStaticBoxSizer* create_group(wxWindow *parent, const wxString &title)
     return new wxStaticBoxSizer(box, wxVERTICAL);
 }
 
-// A separator line, the "Load Optimized Defaults" button and the OK / Cancel buttons at the bottom of a dialog.
+// A separator line, the "Load Optimized Defaults" checkbox and the OK / Cancel buttons at the bottom of a dialog.
 // The optimized defaults test a narrower range, which is enough for most filaments and takes less time to print.
-void add_buttons(wxDialog *dialog, wxSizer *top_sizer, int em, const std::function<void()> &load_optimized_defaults)
+// optimized_defaults is called with true if the checkbox is checked and with false, which restores the defaults of OrcaSlicer,
+// if it is unchecked. There is no checkbox without optimized_defaults.
+void add_buttons(wxDialog *dialog, wxSizer *top_sizer, int em, const std::function<void(bool)> &optimized_defaults = nullptr)
 {
     top_sizer->Add(new StaticLine(dialog), 0, wxEXPAND | wxLEFT | wxRIGHT, em);
     auto *row = new wxBoxSizer(wxHORIZONTAL);
-    auto *button = new wxButton(dialog, wxID_ANY, _L("Load Optimized Defaults"));
-    wxGetApp().SetWindowVariantForButton(button);
-    button->SetToolTip(_L("Test a narrower range, which is enough for most filaments and takes less time to print."));
-    button->Bind(wxEVT_BUTTON, [load_optimized_defaults](wxCommandEvent&) { load_optimized_defaults(); });
-    row->Add(button, 0, wxALIGN_CENTER_VERTICAL);
+    if (optimized_defaults) {
+        auto *checkbox = new ::CheckBox(dialog, _L("Load Optimized Defaults"));
+        checkbox->SetToolTip(_L("If checked, a narrower range is tested, which is enough for most filaments and takes less time to print. "
+                                "If unchecked, the defaults of OrcaSlicer are used."));
+        checkbox->Bind(wxEVT_CHECKBOX, [checkbox, optimized_defaults](wxCommandEvent&) { optimized_defaults(checkbox->GetValue()); });
+        row->Add(checkbox, 0, wxALIGN_CENTER_VERTICAL);
+    }
     row->AddStretchSpacer();
     row->Add(dialog->CreateStdDialogButtonSizer(wxOK | wxCANCEL), 0, wxALIGN_CENTER_VERTICAL);
     top_sizer->Add(row, 0, wxEXPAND | wxALL, em);
@@ -333,8 +336,8 @@ TempTowerDialog::TempTowerDialog(wxWindow *parent)
     auto *top_sizer = new wxBoxSizer(wxVERTICAL);
     top_sizer->Add(grid, 0, wxEXPAND | wxALL, 2 * em);
     top_sizer->Add(m_scale, 0, wxLEFT | wxRIGHT | wxBOTTOM, 2 * em);
-    add_buttons(this, top_sizer, em, [this]() {
-        m_optimized = true;
+    add_buttons(this, top_sizer, em, [this](bool optimized) {
+        m_optimized = optimized;
         this->apply_filament_type();
     });
 
@@ -550,9 +553,9 @@ MaxVolumetricSpeedDialog::MaxVolumetricSpeedDialog(wxWindow *parent)
 
     auto *top_sizer = new wxBoxSizer(wxVERTICAL);
     top_sizer->Add(grid, 0, wxEXPAND | wxALL, 2 * em);
-    add_buttons(this, top_sizer, em, [this]() {
-        set_number(m_start, 15.);
-        set_number(m_end, 30.);
+    add_buttons(this, top_sizer, em, [this](bool optimized) {
+        set_number(m_start, optimized ? 15. : 5.);
+        set_number(m_end, optimized ? 30. : 20.);
         set_number(m_step, 0.5);
     });
 
@@ -792,8 +795,8 @@ PressureAdvanceDialog::PressureAdvanceDialog(wxWindow *parent)
     top_sizer->Add(extruder_types, 0, wxEXPAND | wxALL, 2 * em);
     top_sizer->Add(methods, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 2 * em);
     top_sizer->Add(settings, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 2 * em);
-    add_buttons(this, top_sizer, em, [this]() {
-        m_optimized = true;
+    add_buttons(this, top_sizer, em, [this](bool optimized) {
+        m_optimized = optimized;
         this->reset_params();
     });
 
@@ -1573,7 +1576,7 @@ FlowRatioDialog::FlowRatioDialog(wxWindow *parent)
     auto *top_sizer = new wxBoxSizer(wxVERTICAL);
     top_sizer->Add(tests, 0, wxEXPAND | wxALL, 2 * em);
     top_sizer->Add(settings, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 2 * em);
-    add_buttons(this, top_sizer, em, [this]() { m_tests[size_t(Test::YoloQuick)]->SetValue(true); });
+    add_buttons(this, top_sizer, em);
 
     SetSizerAndFit(top_sizer);
     wxGetApp().UpdateDlgDarkUI(this, true);
@@ -1806,9 +1809,9 @@ RetractionDialog::RetractionDialog(wxWindow *parent)
 
     auto *top_sizer = new wxBoxSizer(wxVERTICAL);
     top_sizer->Add(settings, 0, wxEXPAND | wxALL, 2 * em);
-    add_buttons(this, top_sizer, em, [this]() {
+    add_buttons(this, top_sizer, em, [this](bool optimized) {
         set_number(m_start, 0.);
-        set_number(m_end, 1.);
+        set_number(m_end, optimized ? 1. : 2.);
         set_number(m_step, 0.1);
     });
 

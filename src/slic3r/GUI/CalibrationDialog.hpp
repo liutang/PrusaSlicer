@@ -43,7 +43,7 @@ private:
     ::TextInput *m_start         { nullptr };
     ::TextInput *m_end           { nullptr };
     ::CheckBox  *m_scale         { nullptr };
-    // The temperature ranges of "Load Optimized Defaults" are used for the filament types.
+    // The optimized temperature ranges are used for the filament types, the "Load Optimized Defaults" checkbox is checked.
     bool         m_optimized     { false };
 };
 
@@ -110,7 +110,7 @@ private:
     ::TextInput *m_step     { nullptr };
     ::TextInput *m_speed    { nullptr };
     ::CheckBox  *m_numbers  { nullptr };
-    // The defaults of "Load Optimized Defaults" are used.
+    // The optimized defaults are used, the "Load Optimized Defaults" checkbox is checked.
     bool         m_optimized { false };
 };
 
