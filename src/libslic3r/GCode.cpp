@@ -2924,6 +2924,16 @@ void GCodeGenerator::initialize_instance(
     m_label_objects.update(&print_instance.print_object.instances()[print_instance.instance_id]);
 }
 
+// Area of the support interface extrusions of the support layer.
+static Polygons support_interface_area(const SupportLayer &support_layer)
+{
+    Polygons area;
+    for (const ExtrusionEntity *entity : support_layer.support_fills.flatten().entities)
+        if (entity->role() == ExtrusionRole::SupportMaterialInterface)
+            entity->polygons_covered_by_width(area, float(SCALED_EPSILON));
+    return union_(area);
+}
+
 // Area of the support interface, on which the object layer lies directly. Empty if the layer is not printed on a support interface.
 // With a top contact Z distance, the interface is found the contact distance below the bottom of the layer.
 static Polygons support_interface_below(const PrintObject &print_object, const Layer &layer)
@@ -2938,11 +2948,17 @@ static Polygons support_interface_below(const PrintObject &print_object, const L
     const SupportLayer &support_layer = **(-- it);
     if (bottom_z - support_layer.print_z > print_object.config().support_material_contact_distance.value + EPSILON)
         return {};
-    Polygons area;
-    for (const ExtrusionEntity *entity : support_layer.support_fills.flatten().entities)
-        if (entity->role() == ExtrusionRole::SupportMaterialInterface)
-            entity->polygons_covered_by_width(area, float(SCALED_EPSILON));
-    return union_(area);
+    return support_interface_area(support_layer);
+}
+
+// Does the smooth path run over the area?
+static bool smooth_path_overlaps(const GCode::SmoothPath &path, const Polygons &area, const BoundingBox &area_bbox)
+{
+    Polyline polyline;
+    for (const GCode::SmoothPathElement &element : path)
+        for (const Geometry::ArcWelder::Segment &segment : element.path)
+            polyline.points.emplace_back(segment.point);
+    return polyline.size() > 1 && polyline.bounding_box().overlap(area_bbox) && ! intersection_pl(polyline, area).empty();
 }
 
 std::string GCodeGenerator::extrude_slices(
@@ -3264,9 +3280,23 @@ std::string GCodeGenerator::extrude_support(const std::vector<GCode::ExtrusionOr
     if (! support_extrusions.empty()) {
         const double  support_speed            = m_config.support_material_speed.value;
         const double  support_interface_speed  = m_config.support_material_interface_speed.get_abs_value(support_speed);
+        // The support base printed directly on a support interface below, which is the bottom interface on top of the object,
+        // is slowed down to the interface bridging speed, the same as the object layer printed on a top interface.
+        const double  bridging_speed           = m_config.support_material_interface_bridging_speed.value;
+        Polygons      interface_below;
+        BoundingBox   interface_below_bbox;
+        if (const auto *support_layer = dynamic_cast<const SupportLayer*>(m_layer); support_layer != nullptr && bridging_speed > 0.) {
+            const auto support_layers = support_layer->object()->support_layers();
+            if (auto it = std::find(support_layers.begin(), support_layers.end(), support_layer); it != support_layers.end() && it != support_layers.begin()) {
+                interface_below      = support_interface_area(**(it - 1));
+                interface_below_bbox = get_extents(interface_below);
+            }
+        }
         for (const GCode::ExtrusionOrder::SupportPath &path : support_extrusions) {
             const auto   label = path.is_interface ?  support_interface_label : support_label;
-            const double speed = path.is_interface ? support_interface_speed : support_speed;
+            double       speed = path.is_interface ? support_interface_speed : support_speed;
+            if (! path.is_interface && ! interface_below.empty() && smooth_path_overlaps(path.path, interface_below, interface_below_bbox))
+                speed = speed > 0. ? std::min(speed, bridging_speed) : bridging_speed;
             gcode += this->extrude_smooth_path(path.path, false, label, speed);
         }
     }
