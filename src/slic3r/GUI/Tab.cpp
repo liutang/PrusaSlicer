@@ -1131,12 +1131,15 @@ static void suggest_support_interface_settings(Tab *tab)
     const bool soluble_over_non_soluble = is_soluble(interface_extruder) && ! is_soluble(base_extruder);
 
     // With zero contact distance, the automatic interface pattern would be concentric.
-    // Small interface areas are printed reliably at a low interface speed only. Zero stands for the automatic speed.
-    const double interface_speed = config.get_abs_value("support_material_interface_speed");
+    // Small interface areas are printed reliably at a low speed of the interface and of the object layer on top of it only.
+    // Zero stands for the automatic interface speed and for the normal speeds of the object layer on top of the interface.
+    const double interface_speed          = config.get_abs_value("support_material_interface_speed");
+    const double interface_bridging_speed = config.opt_float("support_material_interface_bridging_speed");
+    auto         slow                     = [](double speed) { return speed > 0. && speed <= 20. + EPSILON; };
     const bool already_set =
         config.opt_float("support_material_contact_distance") == 0 && config.opt_float("support_material_interface_spacing") == 0 &&
         config.opt_enum<SupportMaterialInterfacePattern>("support_material_interface_pattern") == smipRectilinear &&
-        interface_speed > 0. && interface_speed <= 20. + EPSILON;
+        slow(interface_speed) && slow(interface_bridging_speed);
 
     // The bed temperature should follow the model, not the support interface. If the bed temperatures of the model filaments
     // differ as well, there is no single right extruder to take the bed temperature from, so it is left to the user.
@@ -1165,11 +1168,11 @@ static void suggest_support_interface_settings(Tab *tab)
     wxString msg_text = is_soluble(interface_extruder) ?
         _L("When using soluble material for the support interface, we recommend the following settings:\n"
            "0 top contact Z distance, 0 interface pattern spacing, rectilinear interface pattern, "
-           "support interface speed of 20 mm/s, "
+           "support interface speed and interface bridging speed of 20 mm/s, "
            "support layers synchronized with the object layers and soluble materials for both the support interface and the support base.") :
         _L("When using a different material for the support interface, we recommend the following settings:\n"
            "0 top contact Z distance, 0 interface pattern spacing, rectilinear interface pattern, "
-           "support interface speed of 20 mm/s and support layers synchronized with the object layers.");
+           "support interface speed and interface bridging speed of 20 mm/s and support layers synchronized with the object layers.");
     if (set_bed_temperature_extruder)
         msg_text += "\n" + format_wxstr(_L("As the bed temperatures of the used filaments differ, we also recommend to set "
                                            "'Bed temperature by extruder' to %1%, the extruder printing the model."), *model_extruders.begin() + 1);
@@ -1186,8 +1189,10 @@ static void suggest_support_interface_settings(Tab *tab)
         new_conf.set_key_value("support_material_interface_spacing", new ConfigOptionFloat(0));
         new_conf.set_key_value("support_material_interface_pattern", new ConfigOptionEnum<SupportMaterialInterfacePattern>(smipRectilinear));
         new_conf.set_key_value("support_material_synchronize_layers", new ConfigOptionBool(true));
-        if (! (interface_speed > 0. && interface_speed <= 20. + EPSILON))
+        if (! slow(interface_speed))
             new_conf.set_key_value("support_material_interface_speed", new ConfigOptionFloatOrPercent(20., false));
+        if (! slow(interface_bridging_speed))
+            new_conf.set_key_value("support_material_interface_bridging_speed", new ConfigOptionFloat(20.));
         if ((is_pla(interface_type) && model_has_flexible) || soluble_over_non_soluble)
             new_conf.set_key_value("support_material_extruder", new ConfigOptionInt(interface_extruder + 1));
         if (set_bed_temperature_extruder)
