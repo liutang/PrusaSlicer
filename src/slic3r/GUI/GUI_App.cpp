@@ -3429,7 +3429,7 @@ void GUI_App::show_downloader_registration_dialog()
         , true, wxYES_NO);
     if (msg.ShowModal() == wxID_YES) {
         auto downloader_worker = new DownloaderUtils::Worker(nullptr);
-        downloader_worker->perform_download_register(app_config->get("url_downloader_dest"));
+        downloader_worker->perform_download_register(DownloaderUtils::get_download_dest(*app_config));
 #if defined(__linux__) && defined(SLIC3R_DESKTOP_INTEGRATION) 
         if (DownloaderUtils::Worker::perform_registration_linux)
             DesktopIntegrationDialog::perform_downloader_desktop_integration();
@@ -3855,7 +3855,7 @@ void GUI_App::start_download(std::string url)
     #endif //defined(__APPLE__) || (defined(__linux__) && !defined(SLIC3R_DESKTOP_INTEGRATION))
 
     //lets always init so if the download dest folder was changed, new dest is used 
-        boost::filesystem::path dest_folder(app_config->get("url_downloader_dest"));
+        boost::filesystem::path dest_folder(DownloaderUtils::get_download_dest(*app_config));
         if (dest_folder.empty() || !boost::filesystem::is_directory(dest_folder)) {
             std::string msg = _u8L("Could not start URL download. Destination folder is not set. Please choose destination folder in Configuration Wizard.");
             BOOST_LOG_TRIVIAL(error) << msg;
@@ -4199,7 +4199,7 @@ void GUI_App::printables_download_request(const std::string& download_url, const
     //this->mainframe->select_tab(size_t(0));
 
     //lets always init so if the download dest folder was changed, new dest is used 
-    boost::filesystem::path dest_folder(app_config->get("url_downloader_dest"));
+    boost::filesystem::path dest_folder(DownloaderUtils::get_download_dest(*app_config));
     if (dest_folder.empty() || !boost::filesystem::is_directory(dest_folder)) {
         std::string msg = _u8L("Could not start URL download. Destination folder is not set. Please choose destination folder in Configuration Wizard.");
         BOOST_LOG_TRIVIAL(error) << msg;
@@ -4214,7 +4214,7 @@ void GUI_App::printables_slice_request(const std::string& download_url, const st
     this->mainframe->select_tab(size_t(0));
     
     //lets always init so if the download dest folder was changed, new dest is used 
-    boost::filesystem::path dest_folder(app_config->get("url_downloader_dest"));
+    boost::filesystem::path dest_folder(DownloaderUtils::get_download_dest(*app_config));
     if (dest_folder.empty() || !boost::filesystem::is_directory(dest_folder)) {
         std::string msg = _u8L("Could not start URL download. Destination folder is not set. Please choose destination folder in Configuration Wizard.");
         BOOST_LOG_TRIVIAL(error) << msg;

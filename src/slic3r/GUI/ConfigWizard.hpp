@@ -28,6 +28,13 @@ class PresetArchiveDatabase;
 namespace GUI {
 
 namespace DownloaderUtils {
+    // The download path is stored for each operating system separately, so that a configuration shared
+    // by computers running different operating systems holds a valid path for each of them.
+    // Returns the download path of this operating system. If it was not set yet, the Downloads folder of the user is returned.
+    std::string get_download_dest(const AppConfig &app_config);
+    // Stores the download path of this operating system.
+    void        set_download_dest(AppConfig &app_config, const std::string &path);
+
     class Worker : public wxBoxSizer
     {
         wxWindow*   m_parent{ nullptr };
