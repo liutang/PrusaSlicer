@@ -3193,13 +3193,20 @@ void GLCanvas3D::on_char(wxKeyEvent& evt)
                 post_event(SimpleEvent(EVT_GLCANVAS_RELOAD_FROM_DISK));
             break;
         }
-        case '0': { select_view("iso"); break; }
-        case '1': { select_view("top"); break; }
-        case '2': { select_view("bottom"); break; }
-        case '3': { select_view("front"); break; }
-        case '4': { select_view("rear"); break; }
-        case '5': { select_view("left"); break; }
-        case '6': { select_view("right"); break; }
+        case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9': {
+            if (wxGetApp().app_config->get_bool("number_keys_select_tool")) {
+                // As in OrcaSlicer: set the tool of the selected objects and parts, zero sets the default one.
+                // The camera views are selected by Ctrl + number then, by the View menu.
+                const int extruder = keyCode - '0';
+                if (wxGetApp().is_editor() && ! m_selection.is_empty() && wxGetApp().extruders_edited_cnt() > 1 && extruder <= wxGetApp().extruders_edited_cnt())
+                    wxGetApp().obj_list()->set_extruder_for_selected_items(extruder);
+            } else {
+                static const char *views[] = { "iso", "top", "bottom", "front", "rear", "left", "right" };
+                if (keyCode <= '6')
+                    select_view(views[keyCode - '0']);
+            }
+            break;
+        }
         case '+': {
             if (dynamic_cast<Preview*>(m_canvas->GetParent()) != nullptr)
                 post_event(wxKeyEvent(EVT_GLCANVAS_SLIDERS_MANIPULATION, evt));
