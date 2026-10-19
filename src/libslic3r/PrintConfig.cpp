@@ -3526,6 +3526,20 @@ void PrintConfigDef::init_fff_params()
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionFloatOrPercent(100, true));
 
+    def = this->add("support_material_interface_bridging_speed", coFloat);
+    def->label = L("Interface bridging");
+    def->full_label = L("Interface bridging speed");
+    def->category = L("Support material");
+    def->tooltip = L("Speed for printing the object layer, which lies directly on top of the support material interface. "
+                     "Small interface areas printed with a different material need this layer to be printed slowly, "
+                     "so that it sticks to the interface, 20 mm/s is recommended then. "
+                     "Only the extrusions placed over the interface are slowed down. "
+                     "Set zero to print them with their normal speeds.");
+    def->sidetext = L("mm/s");
+    def->min = 0;
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionFloat(0));
+
     def = this->add("support_material_pattern", coEnum);
     def->label = L("Pattern");
     def->category = L("Support material");

@@ -437,6 +437,11 @@ private:
     const Layer*                        m_layer;
     // m_layer is an object layer and it is being printed over raft surface.
     bool                                m_object_layer_over_raft;
+    // Area of the support interface, on which the object layer being extruded lies directly, in the coordinates of the object.
+    // The extrusions over it are printed with the interface bridging speed.
+    const Layer                        *m_interface_bridging_layer { nullptr };
+    Polygons                            m_interface_bridging_area;
+    BoundingBox                         m_interface_bridging_bbox;
     double                              m_volumetric_speed;
     // Speed of the external perimeters set by the max volumetric speed calibration. It replaces the configured speed if not zero.
     double                              m_calibration_speed{ 0. };

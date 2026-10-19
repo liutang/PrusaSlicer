@@ -484,7 +484,7 @@ static std::vector<std::string> s_Preset_print_options {
     "max_volumetric_extrusion_rate_slope_positive", "max_volumetric_extrusion_rate_slope_negative",
     "perimeter_speed", "small_perimeter_speed", "external_perimeter_speed", "infill_speed", "solid_infill_speed",
     "enable_dynamic_overhang_speeds", "overhang_speed_0", "overhang_speed_1", "overhang_speed_2", "overhang_speed_3",
-    "top_solid_infill_speed", "support_material_speed", "support_material_xy_spacing", "support_material_interface_speed",
+    "top_solid_infill_speed", "support_material_speed", "support_material_xy_spacing", "support_material_interface_speed", "support_material_interface_bridging_speed",
     "bridge_speed", "over_bridge_speed", "gap_fill_speed", "gap_fill_enabled", "travel_speed", "travel_speed_z", "first_layer_speed", "first_layer_infill_speed", "first_layer_speed_over_raft", "perimeter_acceleration", "infill_acceleration",
     "external_perimeter_acceleration", "top_solid_infill_acceleration", "solid_infill_acceleration", "travel_acceleration", "wipe_tower_acceleration",
     "bridge_acceleration", "first_layer_acceleration", "first_layer_acceleration_over_raft", "default_acceleration", "skirts", "skirt_distance", "skirt_height", "draft_shield",

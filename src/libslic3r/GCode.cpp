@@ -2955,6 +2955,47 @@ void GCodeGenerator::initialize_instance(
     m_label_objects.update(&print_instance.print_object.instances()[print_instance.instance_id]);
 }
 
+// Area of the support interface of the support layers, whose top is in the range of print_z. The range is extended
+// downwards by the height of the support layer if extend_by_layer_height is set. The interface of one print_z may be split
+// into several support layers. The gaps between the interface lines, given by the interface spacing, are closed,
+// so that an extrusion running along the interface lines above a gap is over the interface as well.
+static Polygons support_interface_area(const PrintObject &print_object, double min_z, double max_z, bool extend_by_layer_height = false)
+{
+    Polygons area;
+    for (const SupportLayer *support_layer : print_object.support_layers())
+        if (support_layer->print_z > min_z - (extend_by_layer_height ? support_layer->height : 0.) - EPSILON && support_layer->print_z < max_z + EPSILON)
+            for (const ExtrusionEntity *entity : support_layer->support_fills.flatten().entities)
+                if (entity->role() == ExtrusionRole::SupportMaterialInterface)
+                    entity->polygons_covered_by_width(area, float(SCALED_EPSILON));
+    if (area.empty())
+        return {};
+    return closing(area, float(scaled(print_object.config().support_material_interface_spacing.value + 0.5)));
+}
+
+// Area of the support interface, on which the object layer lies directly. Empty if the layer is not printed on a support interface.
+// With a top contact Z distance, the support layers are not synchronized with the object layers and the top of the interface
+// is found up to the contact distance and the height of the support layer below the bottom of the layer.
+static Polygons support_interface_below(const PrintObject &print_object, const Layer &layer)
+{
+    const double bottom_z         = layer.print_z - layer.height;
+    const double contact_distance = print_object.config().support_material_contact_distance.value;
+    Polygons     area             = support_interface_area(print_object, bottom_z - contact_distance, bottom_z, contact_distance > 0.);
+    // Only where the layer is the first object layer above the interface, not where the object layer below lies on the interface.
+    if (! area.empty() && layer.lower_layer != nullptr)
+        area = diff(area, layer.lower_layer->lslices);
+    return area;
+}
+
+// Does the smooth path run over the area?
+static bool smooth_path_overlaps(const GCode::SmoothPath &path, const Polygons &area, const BoundingBox &area_bbox)
+{
+    Polyline polyline;
+    for (const GCode::SmoothPathElement &element : path)
+        for (const Geometry::ArcWelder::Segment &segment : element.path)
+            polyline.points.emplace_back(segment.point);
+    return polyline.size() > 1 && polyline.bounding_box().overlap(area_bbox) && ! intersection_pl(polyline, area).empty();
+}
+
 std::string GCodeGenerator::extrude_slices(
     const InstanceToPrint &print_instance,
     const ObjectLayerToPrint &layer_to_print,
@@ -2966,6 +3007,17 @@ std::string GCodeGenerator::extrude_slices(
     // To control print speed of the 1st object layer printed over raft interface.
     m_object_layer_over_raft = layer_to_print.object_layer && layer_to_print.object_layer->id() > 0 &&
         print_object.slicing_parameters().raft_layers() == layer_to_print.object_layer->id();
+    // To control print speed of the extrusions printed directly on a support interface.
+    if (m_config.support_material_interface_bridging_speed.value > 0. && layer_to_print.object_layer != nullptr) {
+        if (m_interface_bridging_layer != layer_to_print.object_layer) {
+            m_interface_bridging_layer = layer_to_print.object_layer;
+            m_interface_bridging_area  = support_interface_below(print_object, *layer_to_print.object_layer);
+            m_interface_bridging_bbox  = get_extents(m_interface_bridging_area);
+        }
+    } else {
+        m_interface_bridging_layer = nullptr;
+        m_interface_bridging_area.clear();
+    }
 
     std::string gcode;
     for (const SliceExtrusions &slice_extrusions : slices_extrusions) {
@@ -3263,9 +3315,27 @@ std::string GCodeGenerator::extrude_support(const std::vector<GCode::ExtrusionOr
     if (! support_extrusions.empty()) {
         const double  support_speed            = m_config.support_material_speed.value;
         const double  support_interface_speed  = m_config.support_material_interface_speed.get_abs_value(support_speed);
+        // The support base printed directly on a support interface below, which is the bottom interface on top of the object,
+        // is slowed down to the interface bridging speed, the same as the object layer printed on a top interface.
+        const double  bridging_speed           = m_config.support_material_interface_bridging_speed.value;
+        Polygons      interface_below;
+        BoundingBox   interface_below_bbox;
+        if (const auto *support_layer = dynamic_cast<const SupportLayer*>(m_layer); support_layer != nullptr && bridging_speed > 0.) {
+            // The support layers of the print_z directly below this support layer.
+            double below_z = -1.;
+            for (const SupportLayer *other : support_layer->object()->support_layers())
+                if (other->print_z < support_layer->print_z - EPSILON)
+                    below_z = std::max(below_z, other->print_z);
+            if (below_z > 0.) {
+                interface_below      = support_interface_area(*support_layer->object(), below_z, below_z);
+                interface_below_bbox = get_extents(interface_below);
+            }
+        }
         for (const GCode::ExtrusionOrder::SupportPath &path : support_extrusions) {
             const auto   label = path.is_interface ?  support_interface_label : support_label;
-            const double speed = path.is_interface ? support_interface_speed : support_speed;
+            double       speed = path.is_interface ? support_interface_speed : support_speed;
+            if (! path.is_interface && ! interface_below.empty() && smooth_path_overlaps(path.path, interface_below, interface_below_bbox))
+                speed = speed > 0. ? std::min(speed, bridging_speed) : bridging_speed;
             gcode += this->extrude_smooth_path(path.path, false, label, speed);
         }
     }
@@ -3551,6 +3621,17 @@ std::string GCodeGenerator::_extrude(
 
     if (dynamic_print_and_fan_speeds.print_speed > -1) {
         speed = dynamic_print_and_fan_speeds.print_speed;
+    }
+
+    // Slow down the extrusions of the object, which are printed directly on a support interface.
+    if (! m_interface_bridging_area.empty() && path.size() > 1 &&
+        (path_attr.role.is_perimeter() || path_attr.role.is_infill() || path_attr.role == ExtrusionRole::GapFill)) {
+        Polyline polyline;
+        polyline.points.reserve(path.size());
+        for (const Geometry::ArcWelder::Segment &segment : path)
+            polyline.points.emplace_back(segment.point);
+        if (polyline.bounding_box().overlap(m_interface_bridging_bbox) && ! intersection_pl(polyline, m_interface_bridging_area).empty())
+            speed = std::min(speed, m_config.support_material_interface_bridging_speed.value);
     }
 
     // cap speed with max_volumetric_speed anyway (even if user is not using autospeed)
