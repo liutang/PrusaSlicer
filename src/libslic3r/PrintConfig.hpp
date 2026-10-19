@@ -743,6 +743,8 @@ PRINT_CONFIG_CLASS_DEFINE(
     ((ConfigOptionInt,                  bottom_solid_layers))
     ((ConfigOptionFloat,                bottom_solid_min_thickness))
     ((ConfigOptionFloat,                bridge_flow_ratio))
+    ((ConfigOptionFloat,                print_flow_ratio))
+    ((ConfigOptionBool,                 calib_flowrate_topinfill_special_order))
     ((ConfigOptionFloat,                bridge_speed))
     ((ConfigOptionEnum<EnsureVerticalShellThickness>, ensure_vertical_shell_thickness))
     ((ConfigOptionFloatOrPercent,       over_bridge_speed))

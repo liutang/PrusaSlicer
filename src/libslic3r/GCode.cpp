@@ -2166,8 +2166,30 @@ static std::string emit_custom_color_change_gcode_per_print_z(
                 gcode += ";" + GCodeProcessor::reserved_tag(GCodeProcessor::ETags::Custom_Code) + "\n";
                 if (gcode_type == CustomGCode::Template)    // Template Custom Gcode
                     gcode += gcodegen.placeholder_parser_process("template_custom_gcode", config.template_custom_gcode, current_extruder_id);
-                else                                        // custom Gcode
+                else {                                      // custom Gcode
                     gcode += custom_gcode.extra;
+                    // The retraction calibration changes the retraction length of the active extruder with the height
+                    // by a comment in the custom G-code. The new length is valid until the end of the print.
+                    static const std::string retract_length_tag = ";CALIBRATION_RETRACT_LENGTH:";
+                    if (size_t pos = custom_gcode.extra.find(retract_length_tag); pos != std::string::npos) {
+                        const double length = string_to_double_decimal_point(std::string_view(custom_gcode.extra).substr(pos + retract_length_tag.size()));
+                        std::vector<double> &lengths = gcodegen.writer().config.retract_length.values;
+                        if (length >= 0. && current_extruder_id < lengths.size())
+                            lengths[current_extruder_id] = length;
+                    }
+                    // The max volumetric speed calibration changes the speed of the external perimeters with the height the same way.
+                    // Layer ranges can not be used for it, as they would split the object into regions, which Spiral Vase does not allow.
+                    // An optional second comment makes the speed grow with the print height.
+                    static const std::string speed_tag        = ";CALIBRATION_SPEED:";
+                    static const std::string speed_per_mm_tag = ";CALIBRATION_SPEED_PER_MM:";
+                    if (size_t pos = custom_gcode.extra.find(speed_tag); pos != std::string::npos)
+                        if (const double speed = string_to_double_decimal_point(std::string_view(custom_gcode.extra).substr(pos + speed_tag.size())); speed > 0.) {
+                            double speed_per_mm = 0.;
+                            if (size_t pos_per_mm = custom_gcode.extra.find(speed_per_mm_tag); pos_per_mm != std::string::npos)
+                                speed_per_mm = string_to_double_decimal_point(std::string_view(custom_gcode.extra).substr(pos_per_mm + speed_per_mm_tag.size()));
+                            gcodegen.set_calibration_speed(speed, speed_per_mm);
+                        }
+                }
             }
             gcode += "\n";
         }
@@ -3450,6 +3472,10 @@ std::string GCodeGenerator::_extrude(
 
     // calculate extrusion length per distance unit
     double e_per_mm = m_writer.extruder()->e_per_mm3() * path_attr.mm3_per_mm;
+    // Flow ratio of the print region. Skirt, brim, supports and the wipe tower do not belong to a print region,
+    // the configuration of the region printed before them would be applied to them.
+    if (path_attr.role.is_perimeter() || path_attr.role.is_infill() || path_attr.role == ExtrusionRole::GapFill)
+        e_per_mm *= m_config.print_flow_ratio.value;
     if (m_writer.extrusion_axis().empty())
         // gcfNoExtrusion
         e_per_mm = 0;
@@ -3487,6 +3513,9 @@ std::string GCodeGenerator::_extrude(
     }
     if (m_volumetric_speed != 0. && speed == 0)
         speed = m_volumetric_speed / path_attr.mm3_per_mm;
+    // The first layer speed below is still applied.
+    if (m_calibration_speed > 0. && path_attr.role == ExtrusionRole::ExternalPerimeter)
+        speed = m_calibration_speed + m_calibration_speed_per_mm * (m_layer != nullptr ? m_layer->print_z : 0.);
     if (this->on_first_layer()) {
         const double first_layer_infill_speed{m_config.get_abs_value("first_layer_infill_speed", speed)};
         if (path_attr.role == ExtrusionRole::SolidInfill && first_layer_infill_speed > 0) {

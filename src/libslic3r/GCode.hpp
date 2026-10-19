@@ -151,6 +151,9 @@ public:
     const Layer*    layer() const { return m_layer; }
     GCodeWriter&    writer() { return m_writer; }
     const GCodeWriter& writer() const { return m_writer; }
+    // Speed of the external perimeters set by the max volumetric speed calibration, zero if not set.
+    // The speed grows by speed_per_mm with each millimeter of print height.
+    void            set_calibration_speed(double speed, double speed_per_mm) { m_calibration_speed = speed; m_calibration_speed_per_mm = speed_per_mm; }
     PlaceholderParser& placeholder_parser() { return m_placeholder_parser_integration.parser; }
     const PlaceholderParser& placeholder_parser() const { return m_placeholder_parser_integration.parser; }
     // Process a template through the placeholder parser, collect error messages to be reported
@@ -435,6 +438,9 @@ private:
     // m_layer is an object layer and it is being printed over raft surface.
     bool                                m_object_layer_over_raft;
     double                              m_volumetric_speed;
+    // Speed of the external perimeters set by the max volumetric speed calibration. It replaces the configured speed if not zero.
+    double                              m_calibration_speed{ 0. };
+    double                              m_calibration_speed_per_mm{ 0. };
     // Support for the extrusion role markers. Which marker is active?
     GCodeExtrusionRole                  m_last_extrusion_role;
     // Support for G-Code Processor

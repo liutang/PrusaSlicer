@@ -754,6 +754,26 @@ void PrintConfigDef::init_fff_params()
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionFloat(1));
 
+    def = this->add("calib_flowrate_topinfill_special_order", coBool);
+    def->label = L("Flow calibration top infill order");
+    def->category = L("Advanced");
+    def->tooltip = L("Used by the flow ratio calibration. If the top fill pattern is Archimedean Chords, the arcs at the corners "
+                     "are printed first and the spiral in the center is printed last, from its center outwards. "
+                     "The lines printed in the opposite directions then meet, which makes an excess of flow easy to feel.");
+    def->mode = comExpert;
+    def->set_default_value(new ConfigOptionBool(false));
+
+    def = this->add("print_flow_ratio", coFloat);
+    def->label = L("Flow ratio");
+    def->category = L("Advanced");
+    def->tooltip = L("This factor changes the amount of plastic extruded for the perimeters and the infill of an object or of a modifier. "
+                     "It multiplies the extrusion multiplier of the filament. It is used by the flow ratio calibration "
+                     "to print each test object with a different flow.");
+    def->min = 0.1;
+    def->max = 2;
+    def->mode = comExpert;
+    def->set_default_value(new ConfigOptionFloat(1));
+
     def = this->add("top_one_perimeter_type", coEnum);
     def->label = L("Single perimeter on top surfaces");
     def->category = L("Layers and Perimeters");

@@ -847,6 +847,7 @@ bool PrintObject::invalidate_state_by_config_options(
             steps.emplace_back(posPrepareInfill);
         } else if (
                opt_key == "top_fill_pattern"
+            || opt_key == "calib_flowrate_topinfill_special_order"
             || opt_key == "bottom_fill_pattern"
             || opt_key == "external_fill_link_max_length"
             || opt_key == "fill_angle"
@@ -895,6 +896,9 @@ bool PrintObject::invalidate_state_by_config_options(
             || opt_key == "thick_bridges") {
             steps.emplace_back(posPerimeters);
             steps.emplace_back(posSupportMaterial);
+        } else if (opt_key == "print_flow_ratio") {
+            // Applied when the G-code is exported.
+            invalidated |= m_print->invalidate_step(psGCodeExport);
         } else if (opt_key == "bridge_flow_ratio") {
             if (m_config.support_material_contact_distance > 0.) {
             	// Only invalidate due to bridging if bridging is enabled.

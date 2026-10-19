@@ -7,6 +7,7 @@
 ///|/
 ///|/ PrusaSlicer is released under the terms of the AGPLv3 or higher
 ///|/
+#include <limits>
 #include <cmath>
 
 #include "../ClipperUtils.hpp"
@@ -131,7 +132,50 @@ void FillPlanePath::_fill_surface_single(
     if (polyline.size() >= 2) {
         Polylines polylines = intersection_pl(polyline, expolygon);
         Polylines chained;
-        if (params.dont_connect() || params.density > 0.5 || polylines.size() <= 1)
+        if (params.flow_calibration_order && polylines.size() > 1) {
+            // Flow ratio calibration, taken from OrcaSlicer: The arcs at the corners are printed first and the center spiral last,
+            // from its center outwards. The center spiral is the longest of the polylines.
+            auto it = std::max_element(polylines.begin(), polylines.end(),
+                [](const Polyline &l, const Polyline &r) { return l.length() < r.length(); });
+            Polyline center_spiral = std::move(*it);
+            // The pattern is centered around the origin.
+            if (center_spiral.first_point().cast<double>().squaredNorm() > center_spiral.last_point().cast<double>().squaredNorm())
+                center_spiral.reverse();
+            polylines.erase(it);
+            // Print the arcs of the left side first, then the arcs of the right side. On each side, print the arcs of the rear corner,
+            // of the front corner and the arcs spanning both corners. Each of these groups is printed from the outside inwards,
+            // so that the arcs are finished next to the center spiral.
+            // The sides are those of the print bed, while the pattern is rotated.
+            struct Arc {
+                Polyline polyline;
+                int      group;
+                double   radius;
+            };
+            std::vector<Arc> arcs;
+            arcs.reserve(polylines.size());
+            for (Polyline &pl : polylines) {
+                auto on_bed = [&direction](const Point &pt) { return pt.rotated(double(direction.first)); };
+                const Point  first  = on_bed(pl.first_point());
+                const Point  last   = on_bed(pl.last_point());
+                const Point &middle = pl.points[pl.points.size() / 2];
+                const Point  mid    = on_bed(middle);
+                // An arc with its end points at the opposite sides of the center spans both corners.
+                const int    part   = (first.y() > 0) != (last.y() > 0) ? 2 : mid.y() > 0 ? 0 : 1;
+                arcs.push_back({ std::move(pl), (mid.x() < 0 ? 0 : 3) + part, middle.cast<double>().norm() });
+            }
+            std::sort(arcs.begin(), arcs.end(), [](const Arc &l, const Arc &r) { return l.group != r.group ? l.group < r.group : l.radius > r.radius; });
+            chained.reserve(arcs.size() + 1);
+            for (Arc &arc : arcs) {
+                // Start each arc at its end closer to the end of the previous arc.
+                if (! chained.empty()) {
+                    const Point &pos = chained.back().last_point();
+                    if ((arc.polyline.last_point() - pos).cast<double>().squaredNorm() < (arc.polyline.first_point() - pos).cast<double>().squaredNorm())
+                        arc.polyline.reverse();
+                }
+                chained.emplace_back(std::move(arc.polyline));
+            }
+            chained.emplace_back(std::move(center_spiral));
+        } else if (params.dont_connect() || params.density > 0.5 || polylines.size() <= 1)
             chained = chain_polylines(std::move(polylines));
         else
             connect_infill(std::move(polylines), expolygon, chained, this->spacing, params);
