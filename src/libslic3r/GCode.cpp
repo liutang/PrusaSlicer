@@ -2924,31 +2924,35 @@ void GCodeGenerator::initialize_instance(
     m_label_objects.update(&print_instance.print_object.instances()[print_instance.instance_id]);
 }
 
-// Area of the support interface extrusions of the support layer.
-static Polygons support_interface_area(const SupportLayer &support_layer)
+// Area of the support interface of the support layers, whose top is in the range of print_z. The range is extended
+// downwards by the height of the support layer if extend_by_layer_height is set. The interface of one print_z may be split
+// into several support layers. The gaps between the interface lines, given by the interface spacing, are closed,
+// so that an extrusion running along the interface lines above a gap is over the interface as well.
+static Polygons support_interface_area(const PrintObject &print_object, double min_z, double max_z, bool extend_by_layer_height = false)
 {
     Polygons area;
-    for (const ExtrusionEntity *entity : support_layer.support_fills.flatten().entities)
-        if (entity->role() == ExtrusionRole::SupportMaterialInterface)
-            entity->polygons_covered_by_width(area, float(SCALED_EPSILON));
-    return union_(area);
+    for (const SupportLayer *support_layer : print_object.support_layers())
+        if (support_layer->print_z > min_z - (extend_by_layer_height ? support_layer->height : 0.) - EPSILON && support_layer->print_z < max_z + EPSILON)
+            for (const ExtrusionEntity *entity : support_layer->support_fills.flatten().entities)
+                if (entity->role() == ExtrusionRole::SupportMaterialInterface)
+                    entity->polygons_covered_by_width(area, float(SCALED_EPSILON));
+    if (area.empty())
+        return {};
+    return closing(area, float(scaled(print_object.config().support_material_interface_spacing.value + 0.5)));
 }
 
 // Area of the support interface, on which the object layer lies directly. Empty if the layer is not printed on a support interface.
-// With a top contact Z distance, the interface is found the contact distance below the bottom of the layer.
+// With a top contact Z distance, the support layers are not synchronized with the object layers and the top of the interface
+// is found up to the contact distance and the height of the support layer below the bottom of the layer.
 static Polygons support_interface_below(const PrintObject &print_object, const Layer &layer)
 {
-    const auto              support_layers = print_object.support_layers();
-    const double            bottom_z       = layer.print_z - layer.height;
-    // The top most support layer at or below the bottom of the object layer.
-    auto it = std::upper_bound(support_layers.begin(), support_layers.end(), bottom_z + EPSILON,
-        [](double z, const SupportLayer *support_layer) { return z < support_layer->print_z; });
-    if (it == support_layers.begin())
-        return {};
-    const SupportLayer &support_layer = **(-- it);
-    if (bottom_z - support_layer.print_z > print_object.config().support_material_contact_distance.value + EPSILON)
-        return {};
-    return support_interface_area(support_layer);
+    const double bottom_z         = layer.print_z - layer.height;
+    const double contact_distance = print_object.config().support_material_contact_distance.value;
+    Polygons     area             = support_interface_area(print_object, bottom_z - contact_distance, bottom_z, contact_distance > 0.);
+    // Only where the layer is the first object layer above the interface, not where the object layer below lies on the interface.
+    if (! area.empty() && layer.lower_layer != nullptr)
+        area = diff(area, layer.lower_layer->lslices);
+    return area;
 }
 
 // Does the smooth path run over the area?
@@ -3286,9 +3290,13 @@ std::string GCodeGenerator::extrude_support(const std::vector<GCode::ExtrusionOr
         Polygons      interface_below;
         BoundingBox   interface_below_bbox;
         if (const auto *support_layer = dynamic_cast<const SupportLayer*>(m_layer); support_layer != nullptr && bridging_speed > 0.) {
-            const auto support_layers = support_layer->object()->support_layers();
-            if (auto it = std::find(support_layers.begin(), support_layers.end(), support_layer); it != support_layers.end() && it != support_layers.begin()) {
-                interface_below      = support_interface_area(**(it - 1));
+            // The support layers of the print_z directly below this support layer.
+            double below_z = -1.;
+            for (const SupportLayer *other : support_layer->object()->support_layers())
+                if (other->print_z < support_layer->print_z - EPSILON)
+                    below_z = std::max(below_z, other->print_z);
+            if (below_z > 0.) {
+                interface_below      = support_interface_area(*support_layer->object(), below_z, below_z);
                 interface_below_bbox = get_extents(interface_below);
             }
         }
