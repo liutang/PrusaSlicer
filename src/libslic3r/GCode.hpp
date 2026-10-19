@@ -434,6 +434,11 @@ private:
     const Layer*                        m_layer;
     // m_layer is an object layer and it is being printed over raft surface.
     bool                                m_object_layer_over_raft;
+    // Area of the support interface, on which the object layer being extruded lies directly, in the coordinates of the object.
+    // The extrusions over it are printed with the interface bridging speed.
+    const Layer                        *m_interface_bridging_layer { nullptr };
+    Polygons                            m_interface_bridging_area;
+    BoundingBox                         m_interface_bridging_bbox;
     double                              m_volumetric_speed;
     // Support for the extrusion role markers. Which marker is active?
     GCodeExtrusionRole                  m_last_extrusion_role;
