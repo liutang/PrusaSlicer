@@ -1483,6 +1483,8 @@ ModelVolumeType ModelVolume::type_from_string(const std::string &s)
 		return ModelVolumeType::SUPPORT_ENFORCER;
     if (s == "SupportBlocker")
 		return ModelVolumeType::SUPPORT_BLOCKER;
+    if (s == "PrintOnlyVolume")
+        return ModelVolumeType::PRINT_ONLY_VOLUME;
     assert(s == "0");
     // Default value if invalud type string received.
 	return ModelVolumeType::MODEL_PART;
@@ -1496,6 +1498,7 @@ std::string ModelVolume::type_to_string(const ModelVolumeType t)
 	case ModelVolumeType::PARAMETER_MODIFIER: return "ParameterModifier";
 	case ModelVolumeType::SUPPORT_ENFORCER:   return "SupportEnforcer";
 	case ModelVolumeType::SUPPORT_BLOCKER:    return "SupportBlocker";
+    case ModelVolumeType::PRINT_ONLY_VOLUME:  return "PrintOnlyVolume";
     default:
         assert(false);
         return "ModelPart";

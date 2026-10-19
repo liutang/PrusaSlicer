@@ -74,6 +74,7 @@ public:
     static const ColorRGBA NEUTRAL_COLOR;
     static const std::array<ColorRGBA, 4> MODEL_COLOR;
     static const ColorRGBA NEGATIVE_VOLUME_COLOR;
+    static const ColorRGBA PRINT_ONLY_VOLUME_COLOR;
     static const ColorRGBA PARAMETER_MODIFIER_COLOR;
     static const ColorRGBA SUPPORT_BLOCKER_COLOR;
     static const ColorRGBA SUPPORT_ENFORCER_COLOR;

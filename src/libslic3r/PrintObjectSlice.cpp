@@ -227,6 +227,43 @@ static std::vector<VolumeSlices> slice_volumes_inner(
     return out;
 }
 
+// Slice the print only volumes of an object and merge their slices layer by layer.
+// Returns false if the object has no print only volume.
+static bool slice_print_only_volumes(
+    const PrintConfig             &print_config,
+    const PrintObjectConfig       &print_object_config,
+    const Transform3d             &object_trafo,
+    const ModelVolumePtrs         &model_volumes,
+    const std::vector<float>      &zs,
+    const std::function<void()>   &throw_on_cancel_callback,
+    std::vector<ExPolygons>       &out)
+{
+    // The same parameters the negative volumes are sliced with: no XY size compensation.
+    MeshSlicingParamsEx params;
+    params.closing_radius = print_object_config.slice_closing_radius.value;
+    params.extra_offset   = 0;
+    params.trafo          = object_trafo;
+    params.resolution     = print_config.resolution.value;
+
+    size_t num_volumes = 0;
+    out.assign(zs.size(), ExPolygons());
+    for (const ModelVolume *model_volume : model_volumes)
+        if (model_volume->is_print_only_volume()) {
+            std::vector<ExPolygons> slices = slice_volume(*model_volume, zs, params, throw_on_cancel_callback);
+            for (size_t i = 0; i < slices.size() && i < out.size(); ++ i)
+                append(out[i], std::move(slices[i]));
+            ++ num_volumes;
+        }
+    if (num_volumes > 1)
+        // The print only volumes may overlap.
+        for (ExPolygons &expolygons : out)
+            if (! expolygons.empty()) {
+                expolygons = union_ex(expolygons);
+                throw_on_cancel_callback();
+            }
+    return num_volumes > 0;
+}
+
 static inline VolumeSlices& volume_slices_find_by_id(std::vector<VolumeSlices> &volume_slices, const ObjectID id)
 {
     auto it = lower_bound_by_predicate(volume_slices.begin(), volume_slices.end(), [id](const VolumeSlices &vs) { return vs.volume_id < id; });
@@ -888,6 +925,20 @@ void PrintObject::slice_volumes()
             print->config(), this->config(), this->trafo_centered(),
             this->model_object()->volumes, m_shared_regions->layer_ranges, slice_zs, throw_on_cancel_callback),
         throw_on_cancel_callback);
+
+    // If the object has print only volumes, keep just what is inside of them. Parts of the object may be left floating
+    // in the air or the object may end up empty, the same as with the negative volumes.
+    if (std::vector<ExPolygons> print_only_slices;
+        slice_print_only_volumes(print->config(), this->config(), this->trafo_centered(), this->model_object()->volumes, slice_zs, throw_on_cancel_callback, print_only_slices)) {
+        BOOST_LOG_TRIVIAL(debug) << "Slicing volumes - clipping by print only volumes";
+        for (std::vector<ExPolygons> &by_layer : region_slices)
+            for (size_t layer_id = 0; layer_id < by_layer.size(); ++ layer_id)
+                if (! by_layer[layer_id].empty()) {
+                    by_layer[layer_id] = layer_id < print_only_slices.size() && ! print_only_slices[layer_id].empty() ?
+                        intersection_ex(by_layer[layer_id], print_only_slices[layer_id]) : ExPolygons();
+                    throw_on_cancel_callback();
+                }
+    }
 
     for (size_t region_id = 0; region_id < region_slices.size(); ++ region_id) {
         std::vector<ExPolygons> &by_layer = region_slices[region_id];

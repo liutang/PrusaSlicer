@@ -188,14 +188,33 @@ wxBitmapBundle* SettingsFactory::get_category_bitmap(const std::string& category
 //-------------------------------------
 
 // Note: id accords to type of the sub-object (adding volume), so sequence of the menu items is important
-static const constexpr std::array<std::pair<const char *, const char *>, 5> ADD_VOLUME_MENU_ITEMS = {{
+static const constexpr std::array<std::pair<const char *, const char *>, 6> ADD_VOLUME_MENU_ITEMS = {{
     //       menu_item Name              menu_item bitmap name
     {L("Add part"),              "add_part" },           // ~ModelVolumeType::MODEL_PART
     {L("Add negative volume"),   "add_negative" },       // ~ModelVolumeType::NEGATIVE_VOLUME
     {L("Add modifier"),          "add_modifier"},        // ~ModelVolumeType::PARAMETER_MODIFIER
     {L("Add support blocker"),   "support_blocker"},     // ~ModelVolumeType::SUPPORT_BLOCKER
     {L("Add support enforcer"),  "support_enforcer"},    // ~ModelVolumeType::SUPPORT_ENFORCER
+    {L("Add print only volume"), "add_print_only"},      // ~ModelVolumeType::PRINT_ONLY_VOLUME
 }};
+
+// The sequence of the "add" items in the menu: the print only volume follows the negative volume, which it is the opposite of.
+static const constexpr std::array<ModelVolumeType, 6> ADD_VOLUME_MENU_ORDER = {
+    ModelVolumeType::MODEL_PART, ModelVolumeType::NEGATIVE_VOLUME, ModelVolumeType::PRINT_ONLY_VOLUME,
+    ModelVolumeType::PARAMETER_MODIFIER, ModelVolumeType::SUPPORT_BLOCKER, ModelVolumeType::SUPPORT_ENFORCER
+};
+
+// A text or an SVG is a part, a negative volume, a modifier or a print only volume. The bitmaps are indexed by the volume type,
+// a print only volume is shown with the bitmap of the negative volume.
+static std::vector<wxBitmapBundle*> emboss_volume_bitmaps(const std::array<std::pair<const char *, const char *>, 3> &icons)
+{
+    std::vector<wxBitmapBundle*> volume_bmps;
+    for (size_t type = 0; type < ADD_VOLUME_MENU_ITEMS.size(); ++ type)
+        volume_bmps.push_back(get_bmp_bundle(icons[
+            type < icons.size() ? type :
+            ModelVolumeType(type) == ModelVolumeType::PRINT_ONLY_VOLUME ? size_t(ModelVolumeType::NEGATIVE_VOLUME) : size_t(ModelVolumeType::PARAMETER_MODIFIER)].second));
+    return volume_bmps;
+}
 
 // Note: id accords to type of the sub-object (adding volume), so sequence of the menu items is important
 static const constexpr std::array<std::pair<const char *, const char *>, 3> TEXT_VOLUME_ICONS {{
@@ -488,20 +507,12 @@ std::vector<wxBitmapBundle*> MenuFactory::get_volume_bitmaps()
 
 std::vector<wxBitmapBundle*> MenuFactory::get_text_volume_bitmaps()
 {
-    std::vector<wxBitmapBundle*> volume_bmps;
-    volume_bmps.reserve(TEXT_VOLUME_ICONS.size());
-    for (const auto& item : TEXT_VOLUME_ICONS)
-        volume_bmps.push_back(get_bmp_bundle(item.second));
-    return volume_bmps;
+    return emboss_volume_bitmaps(TEXT_VOLUME_ICONS);
 }
 
 std::vector<wxBitmapBundle*> MenuFactory::get_svg_volume_bitmaps()
 {
-    std::vector<wxBitmapBundle *> volume_bmps;
-    volume_bmps.reserve(SVG_VOLUME_ICONS.size());
-    for (const auto &item : SVG_VOLUME_ICONS)
-        volume_bmps.push_back(get_bmp_bundle(item.second));
-    return volume_bmps;
+    return emboss_volume_bitmaps(SVG_VOLUME_ICONS);
 }
 
 wxString MenuFactory::get_repaire_result_message(
@@ -605,6 +616,7 @@ static void append_menu_itemm_add_(const wxString& name, GLGizmosManager::EType 
     };
 
     if (type == ModelVolumeType::MODEL_PART || type == ModelVolumeType::NEGATIVE_VOLUME || type == ModelVolumeType::PARAMETER_MODIFIER ||
+        type == ModelVolumeType::PRINT_ONLY_VOLUME ||
         type == ModelVolumeType::INVALID // cannot use gizmo without selected object
     ) {
         wxString item_name = wxString(is_submenu_item ? "" : _(ADD_VOLUME_MENU_ITEMS[int(type)].first) + ": ") + name;
@@ -663,9 +675,11 @@ void MenuFactory::append_menu_items_add_volume(MenuType menu_type)
         return;
     }
 
-    for (size_t type = 0; type < ADD_VOLUME_MENU_ITEMS.size(); type++) {
+    for (const ModelVolumeType volume_type : ADD_VOLUME_MENU_ORDER) {
+        const size_t type = size_t(volume_type);
         auto& item = ADD_VOLUME_MENU_ITEMS[type];
-        if (menu_type == mtObjectSLA && ModelVolumeType(type) == ModelVolumeType::PARAMETER_MODIFIER)
+        // The modifiers and the print only volumes are processed by the FFF slicing only.
+        if (menu_type == mtObjectSLA && (volume_type == ModelVolumeType::PARAMETER_MODIFIER || volume_type == ModelVolumeType::PRINT_ONLY_VOLUME))
             continue;
         wxMenu* sub_menu = append_submenu_add_generic(menu, ModelVolumeType(type));
         append_submenu(menu, sub_menu, wxID_ANY, _(item.first), "", item.second,
