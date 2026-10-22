@@ -105,6 +105,8 @@ class Sidebar : public wxPanel
     std::unique_ptr<ObjectSettingsTabs> m_object_settings_tabs;
     wxBoxSizer*                         m_params_sizer { nullptr };
     wxSizerItem*                        m_params_spacer { nullptr };
+    // The print was sliced and the sliced info is up to date.
+    bool                                m_sliced_info_valid { false };
 
     bool m_autoslicing_mode{ false };
 #ifdef _WIN32
@@ -138,6 +140,8 @@ public:
     // How the object settings tabs share the height of the sidebar with the object list.
     enum class SettingsTabsLayout { None, FirstTab, Page };
     void                    set_object_settings_layout(SettingsTabsLayout layout);
+    // The sliced info as (label, value) rows, each possibly of several lines; empty if not sliced.
+    std::vector<std::pair<std::string, std::string>> sliced_info_rows() const;
 
     ConfigOptionsGroup*     og_freq_chng_params(const bool is_fff);
     wxButton*               get_wiping_dialog_button();

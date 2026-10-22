@@ -295,8 +295,19 @@ public:
     SlicedInfo(wxWindow *parent);
     void SetTextAndShow(SlicedInfoIdx idx, const wxString& text, const wxString& new_label="");
 
+    struct Row {
+        wxString label;
+        wxString value;
+        bool     shown { false };
+    };
+    const std::vector<Row>& rows() const { return m_rows; }
+    // The FFF sliced info is shown in the legend of the preview: only the rows are kept, the labels stay hidden.
+    void set_show_widgets(bool show) { m_show_widgets = show; }
+
 private:
     std::vector<std::pair<wxStaticText*, wxStaticText*>> info_vec;
+    std::vector<Row> m_rows;
+    bool             m_show_widgets { true };
 };
 
 SlicedInfo::SlicedInfo(wxWindow *parent) :
@@ -318,6 +329,7 @@ SlicedInfo::SlicedInfo(wxWindow *parent) :
         grid_sizer->Add(text, 0);
         grid_sizer->Add(info_label, 0);
         info_vec.push_back(std::pair<wxStaticText*, wxStaticText*>(text, info_label));
+        m_rows.push_back({ text_label, "N/A", false });
     };
 
     init_info_label(_L("Used Filament (g)"));
@@ -335,12 +347,17 @@ SlicedInfo::SlicedInfo(wxWindow *parent) :
 void SlicedInfo::SetTextAndShow(SlicedInfoIdx idx, const wxString& text, const wxString& new_label/*=""*/)
 {
     const bool show = text != "N/A";
-    if (show)
+    if (show) {
         info_vec[idx].second->SetLabelText(text);
-    if (!new_label.IsEmpty())
+        m_rows[idx].value = text;
+    }
+    if (!new_label.IsEmpty()) {
         info_vec[idx].first->SetLabelText(new_label);
-    info_vec[idx].first->Show(show);
-    info_vec[idx].second->Show(show);
+        m_rows[idx].label = new_label;
+    }
+    m_rows[idx].shown = show;
+    info_vec[idx].first->Show(show && m_show_widgets);
+    info_vec[idx].second->Show(show && m_show_widgets);
 }
 
 
@@ -1312,7 +1329,7 @@ void Sidebar::show_info_sizer()
 
 void Sidebar::update_sliced_info_sizer()
 {
-    if (m_sliced_info->IsShown(size_t(0)))
+    if (m_sliced_info_valid)
     {
         if (m_plater->printer_technology() == ptSLA)
         {
@@ -1549,12 +1566,30 @@ void Sidebar::show_sliced_info_sizer(const bool show)
 
     wxWindowUpdateLocker freeze_guard(this);
 
-    m_sliced_info->Show(show);
+    // The sliced info of a FFF print is shown in the legend of the preview instead of the sidebar, so that it
+    // doesn't take the room of the settings and goes away with the preview.
+    const bool in_sidebar = m_plater->printer_technology() == ptSLA;
+    m_sliced_info_valid   = show;
+    m_sliced_info->set_show_widgets(in_sidebar);
+    m_sliced_info->Show(show && in_sidebar);
     if (show)
         update_sliced_info_sizer();
 
     Layout();
     m_scrolled_panel->Refresh();
+    if (!in_sidebar)
+        if (GLCanvas3D *canvas = m_plater->get_current_canvas3D())
+            canvas->set_as_dirty();
+}
+
+std::vector<std::pair<std::string, std::string>> Sidebar::sliced_info_rows() const
+{
+    std::vector<std::pair<std::string, std::string>> rows;
+    if (m_sliced_info_valid)
+        for (const SlicedInfo::Row &row : m_sliced_info->rows())
+            if (row.shown)
+                rows.emplace_back(into_u8(row.label), into_u8(row.value));
+    return rows;
 }
 
 void Sidebar::show_btns_sizer(const bool show)
