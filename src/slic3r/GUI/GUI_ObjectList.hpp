@@ -14,6 +14,7 @@
 #include <wx/menu.h>
 
 #include "Event.hpp"
+#include "GUI_ObjectSettingsTabs.hpp"
 #include "wxExtensions.hpp"
 #include "ObjectDataViewModel.hpp"
 
@@ -298,6 +299,10 @@ public:
 
     void                changed_object(const int obj_idx = -1) const;
     void                part_selection_changed();
+    // Add, update or remove the Settings item of an object, part or height range after its settings changed.
+    void                update_settings_item(wxDataViewItem item);
+    // The objects, parts or height ranges whose settings the settings tabs of the sidebar show for the selection.
+    bool                settings_tabs_items(ObjectSettingsTabs::Kind &kind, std::vector<SettingsTabsItem> &items);
 
     // Add object's volumes to the list
     // Return selected items, if add_to_selection is defined 

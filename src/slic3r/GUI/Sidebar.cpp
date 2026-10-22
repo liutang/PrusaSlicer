@@ -60,6 +60,7 @@
 #include "GUI_ObjectList.hpp"
 #include "GUI_ObjectManipulation.hpp"
 #include "GUI_ObjectLayers.hpp"
+#include "GUI_ObjectSettingsTabs.hpp"
 #include "wxExtensions.hpp"
 #include "format.hpp"
 #include "Selection.hpp"
@@ -607,6 +608,7 @@ Sidebar::Sidebar(Plater *parent)
     init_workflow_combo(margin_5);
 
     wxBoxSizer* params_sizer = new wxBoxSizer(wxVERTICAL);
+    m_params_sizer = params_sizer;
 
     // Frequently changed parameters
     m_frequently_changed_parameters = std::make_unique<FreqChangedParams>(m_scrolled_panel);
@@ -622,6 +624,11 @@ Sidebar::Sidebar(Plater *parent)
     m_object_list = new ObjectList(m_scrolled_panel);
     params_sizer->Add(m_object_list->get_sizer(), 1, wxEXPAND);
 
+    // Settings of the selected objects, parts or height ranges as tabs; the first tab shows the
+    // Object manipulation or the height range below.
+    m_object_settings_tabs = std::make_unique<ObjectSettingsTabs>(m_scrolled_panel);
+    params_sizer->Add(m_object_settings_tabs->get_sizer(), 0, wxEXPAND);
+
     // Object Manipulations
     m_object_manipulation = std::make_unique<ObjectManipulation>(m_scrolled_panel);
     m_object_manipulation->Hide();
@@ -636,6 +643,9 @@ Sidebar::Sidebar(Plater *parent)
     m_object_layers = std::make_unique<ObjectLayers>(m_scrolled_panel);
     m_object_layers->Hide();
     params_sizer->Add(m_object_layers->get_sizer(), 0, wxEXPAND | wxTOP, margin_5);
+    // Takes the height left below Object manipulation or the height range while the first tab of the
+    // object settings is shown, so that the tabs stay where they are for every tab.
+    m_params_spacer = params_sizer->AddStretchSpacer(0);
 
     // Info boxes
     m_object_info = new ObjectInfo(m_scrolled_panel);
@@ -1118,6 +1128,7 @@ void Sidebar::msw_rescale()
     m_object_list                  ->msw_rescale();
     m_object_manipulation          ->msw_rescale();
     m_object_layers                ->msw_rescale();
+    m_object_settings_tabs         ->msw_rescale();
 
 #ifdef _WIN32
     const int scaled_height = m_btn_export_gcode_removable->GetBitmapHeight();
@@ -1158,6 +1169,7 @@ void Sidebar::sys_color_changed()
         combo->sys_color_changed();
 
     m_object_list        ->sys_color_changed();
+    m_object_settings_tabs->sys_color_changed();
     m_object_manipulation->sys_color_changed();
     m_object_layers      ->sys_color_changed();
 
@@ -1177,6 +1189,23 @@ ObjectManipulation* Sidebar::obj_manipul()
 ObjectList* Sidebar::obj_list()
 {
     return m_object_list;
+}
+
+ObjectSettingsTabs* Sidebar::obj_settings_tabs()
+{
+    return m_object_settings_tabs.get();
+}
+
+void Sidebar::set_object_settings_layout(SettingsTabsLayout layout)
+{
+    // While the tabs are shown, the object list keeps the height of its items; a page of settings fills the
+    // rest, below the panel of the first tab is empty room.
+    if (wxSizerItem *item = m_params_sizer->GetItem(m_object_list->get_sizer()))
+        item->SetProportion(layout == SettingsTabsLayout::None ? 1 : 0);
+    if (wxSizerItem *item = m_params_sizer->GetItem(m_object_settings_tabs->get_sizer()))
+        item->SetProportion(layout == SettingsTabsLayout::Page ? 1 : 0);
+    if (m_params_spacer != nullptr)
+        m_params_spacer->SetProportion(layout == SettingsTabsLayout::FirstTab ? 1 : 0);
 }
 
 ObjectSettings* Sidebar::obj_settings()
@@ -1206,6 +1235,11 @@ void Sidebar::update_objects_list_extruder_column(size_t extruders_count)
 
 void Sidebar::show_info_sizer()
 {
+    // The info about the object goes with Object manipulation, not with a page of its settings.
+    if (m_object_settings_tabs && m_object_settings_tabs->page_shown()) {
+        m_object_info->Show(false);
+        return;
+    }
     Selection& selection = wxGetApp().plater()->canvas3D()->get_selection();
     ModelObjectPtrs objects = m_plater->model().objects;
     const int obj_idx = selection.get_object_idx();

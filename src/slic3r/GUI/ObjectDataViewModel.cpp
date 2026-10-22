@@ -185,12 +185,26 @@ bool ObjectDataViewModelNode::valid()
 
 void ObjectDataViewModelNode::set_action_and_extruder_icons()
 {
-    m_action_icon_name = m_type & itObject              ? "advanced_plus" : 
-                         m_type & (itVolume | itLayer)  ? "cog" : /*m_type & itInstance*/ "set_separate_obj";
-    m_action_icon = *get_bmp_bundle(m_action_icon_name);
+    set_action_icon();
 
     // set extruder bitmap
     set_extruder_icon();
+}
+
+void ObjectDataViewModelNode::set_action_icon()
+{
+    m_action_icon_name = m_has_settings                 ? "settings" :
+                         m_type & itObject              ? "advanced_plus" :
+                         m_type & (itVolume | itLayer)  ? "cog" : /*m_type & itInstance*/ "set_separate_obj";
+    m_action_icon = *get_bmp_bundle(m_action_icon_name);
+}
+
+void ObjectDataViewModelNode::set_has_settings(bool has_settings)
+{
+    if (m_has_settings == has_settings)
+        return;
+    m_has_settings = has_settings;
+    set_action_icon();
 }
 
 void ObjectDataViewModelNode::set_extruder_icon()
@@ -1679,6 +1693,22 @@ bool ObjectDataViewModel::IsSettingsItem(const wxDataViewItem &item) const
         return false;
     ObjectDataViewModelNode *node = static_cast<ObjectDataViewModelNode*>(item.GetID());
     return node->m_type == itSettings;
+}
+
+void ObjectDataViewModel::SetHasSettings(const wxDataViewItem &item, bool has_settings)
+{
+    if (!item.IsOk())
+        return;
+    ObjectDataViewModelNode *node = static_cast<ObjectDataViewModelNode*>(item.GetID());
+    if (node->has_settings() == has_settings)
+        return;
+    node->set_has_settings(has_settings);
+    ItemChanged(item);
+}
+
+bool ObjectDataViewModel::HasSettings(const wxDataViewItem &item) const
+{
+    return item.IsOk() && static_cast<ObjectDataViewModelNode*>(item.GetID())->has_settings();
 }
 
 void ObjectDataViewModel::UpdateSettingsDigest(const wxDataViewItem &item, 
