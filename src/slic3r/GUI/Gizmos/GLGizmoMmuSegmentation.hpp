@@ -131,6 +131,9 @@ protected:
     std::vector<ColorRGBA>            m_original_extruders_colors;
     std::vector<ColorRGBA>            m_modified_extruders_colors;
     std::vector<int>                  m_original_volumes_extruder_idxs;
+    // Remapping of the filaments of the selected object, adapted from OrcaSlicer: m_extruder_remap[i] is the 0-based index
+    // of the filament, which the filament i (painted or of a whole part) is changed to by the Remap button.
+    std::vector<size_t>               m_extruder_remap;
 
     static const constexpr float      CursorRadiusMin = 0.1f; // cannot be zero
 
@@ -146,6 +149,11 @@ private:
 
     void init_model_triangle_selectors();
     void init_extruders_data();
+    void reset_extruder_remap();
+    // 0-based indices of the filaments used by the selected object, painted or as the filament of a whole part.
+    std::vector<size_t> used_extruders() const;
+    void render_extruder_remap(float max_tooltip_width);
+    void remap_extruders();
 
     // This map holds all translated description texts, so they can be easily referenced during layout calculations
     // etc. When language changes, GUI is recreated and this class constructed again, so the change takes effect.
