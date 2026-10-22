@@ -314,6 +314,8 @@ public:
 
 	wxWindow*	parent() const { return m_parent; }
 	wxString	title()	 const { return m_title; }
+	// The pages of the tab, also used to lay out the settings of objects in the sidebar.
+	const std::vector<PageShp>& get_pages() const { return m_pages; }
 	std::string	name()	 const { return m_presets->name(); }
     Preset::Type type()  const { return m_type; }
     // The tab is already constructed.

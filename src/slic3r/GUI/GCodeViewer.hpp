@@ -246,6 +246,8 @@ private:
 #endif // VGCODE_ENABLE_COG_AND_TOOL_MARKERS
     bool m_legend_visible{ true };
     bool m_legend_enabled{ true };
+    // The legend shows the sliced info, the first entry of its view type combo.
+    bool m_show_sliced_info{ false };
     struct ViewTypeCache
     {
         bool write{ false };

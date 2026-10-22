@@ -21,6 +21,7 @@
 #include "GUI_App.hpp"
 #include "MainFrame.hpp"
 #include "Plater.hpp"
+#include "Sidebar.hpp"
 #include "Camera.hpp"
 #include "I18N.hpp"
 #include "GUI_Utils.hpp"
@@ -2436,6 +2437,11 @@ void GCodeViewer::render_legend(float& legend_height)
         offsets = calculate_offsets(labels, times, { "Extruder NNN", longest_used_filament_string }, icon_size);
     }
 
+    // The sliced info is the first entry of the view type combo; it isn't a view type, the toolpaths keep theirs.
+    const std::vector<std::pair<std::string, std::string>> sliced_info =
+        wxGetApp().is_editor() ? wxGetApp().sidebar().sliced_info_rows() : std::vector<std::pair<std::string, std::string>>();
+    constexpr int sliced_info_id = -1;
+
     // selection section
     bool view_type_changed = false;
     int new_view_type_i = curr_view_type_i;
@@ -2482,11 +2488,27 @@ void GCodeViewer::render_legend(float& legend_height)
             new_view_type_i == static_cast<int>(libvgcode::EViewType::LayerTimeLogarithmic))
             new_view_type_i = 0;
     }
-    auto new_view_type_it = std::find(view_options_id.begin(), view_options_id.end(), new_view_type_i);
+    if (!sliced_info.empty()) {
+        view_options.insert(view_options.begin(), _u8L("Sliced Info"));
+        view_options_id.insert(view_options_id.begin(), sliced_info_id);
+    }
+    auto new_view_type_it = std::find(view_options_id.begin(), view_options_id.end(),
+                                      m_show_sliced_info && !sliced_info.empty() ? sliced_info_id : new_view_type_i);
     int new_view_type_id = (new_view_type_it == view_options_id.end()) ? 0 : std::distance(view_options_id.begin(), new_view_type_it);
-    if (ImGuiPureWrap::combo(std::string(), view_options, new_view_type_id, ImGuiComboFlags_HeightLargest, 0.0f, -1.0f))
-        new_view_type_i = view_options_id[new_view_type_id];
+    if (ImGuiPureWrap::combo(std::string(), view_options, new_view_type_id, ImGuiComboFlags_HeightLargest, 0.0f, -1.0f)) {
+        const bool show_sliced_info = view_options_id[new_view_type_id] == sliced_info_id;
+        if (show_sliced_info != m_show_sliced_info) {
+            m_show_sliced_info = show_sliced_info;
+            wxGetApp().plater()->get_current_canvas3D()->set_as_dirty();
+            wxGetApp().plater()->get_current_canvas3D()->request_extra_frame();
+        }
+        if (!show_sliced_info)
+            new_view_type_i = view_options_id[new_view_type_id];
+    }
     ImGui::PopStyleColor(2);
+    const bool sliced_info_shown = m_show_sliced_info && !sliced_info.empty();
+    // The sliced info holds the printing times as well.
+    show_estimated_time &= !sliced_info_shown;
    
     if (curr_view_type_i != new_view_type_i) {
         enable_view_type_cache_load(false);
@@ -2500,15 +2522,47 @@ void GCodeViewer::render_legend(float& legend_height)
 
     const libvgcode::EViewType new_view_type = m_viewer.get_view_type();
 
-    // extrusion paths section -> title
-    if (new_view_type == libvgcode::EViewType::FeatureType)
-        append_headers({ "", _u8L("Time"), _u8L("Percentage"), _u8L("Used filament") }, offsets);
-    else if (new_view_type == libvgcode::EViewType::Tool)
-        append_headers({ "", _u8L("Used filament"), "", "" }, offsets);
-    else
+    // sliced info section, in place of the sections of the view type
+    if (sliced_info_shown) {
         ImGui::Separator();
+        if (ImGui::BeginTable("SlicedInfo", 2)) {
+            // A row may hold several lines, e.g. the filament of the objects and of the wipe tower; the lines of
+            // a value go with the lines of its label, e.g. the printing time with "- normal mode".
+            auto lines = [](const std::string &text) {
+                std::vector<std::string> out;
+                boost::split(out, text, boost::is_any_of("\n"));
+                for (std::string &line : out)
+                    boost::trim_right(line);
+                return out;
+            };
+            for (const auto &[label, value] : sliced_info) {
+                const std::vector<std::string> label_lines = lines(label);
+                const std::vector<std::string> value_lines = lines(value);
+                for (size_t i = 0; i < std::max(label_lines.size(), value_lines.size()); ++ i) {
+                    ImGui::TableNextRow();
+                    ImGui::TableSetColumnIndex(0);
+                    if (i < label_lines.size())
+                        ImGuiPureWrap::text_colored(ImGuiPureWrap::COL_ORANGE_LIGHT, label_lines[i]);
+                    ImGui::TableSetColumnIndex(1);
+                    if (i < value_lines.size())
+                        ImGuiPureWrap::text(value_lines[i]);
+                }
+            }
+            ImGui::EndTable();
+        }
+    }
 
-    if (!view_type_changed) {
+    // extrusion paths section -> title
+    if (!sliced_info_shown) {
+        if (new_view_type == libvgcode::EViewType::FeatureType)
+            append_headers({ "", _u8L("Time"), _u8L("Percentage"), _u8L("Used filament") }, offsets);
+        else if (new_view_type == libvgcode::EViewType::Tool)
+            append_headers({ "", _u8L("Used filament"), "", "" }, offsets);
+        else
+            ImGui::Separator();
+    }
+
+    if (!view_type_changed && !sliced_info_shown) {
         // extrusion paths section -> items
         switch (new_view_type)
         {
@@ -2629,7 +2683,7 @@ void GCodeViewer::render_legend(float& legend_height)
     }
 
     // partial estimated printing time section
-    if (new_view_type == libvgcode::EViewType::ColorPrint) {
+    if (new_view_type == libvgcode::EViewType::ColorPrint && !sliced_info_shown) {
         using Times = std::pair<float, float>;
         using TimesList = std::vector<std::pair<CustomGCode::Type, Times>>;
 
@@ -2824,6 +2878,7 @@ void GCodeViewer::render_legend(float& legend_height)
     has_settings |= has_filament_settings;
     bool show_settings = wxGetApp().is_gcode_viewer();
     show_settings &= (new_view_type == libvgcode::EViewType::FeatureType || new_view_type == libvgcode::EViewType::Tool);
+    show_settings &= !sliced_info_shown;
     show_settings &= has_settings;
     if (show_settings) {
         ImGui::Spacing();
@@ -2861,8 +2916,8 @@ void GCodeViewer::render_legend(float& legend_height)
         }
     }
 
-    if (new_view_type == libvgcode::EViewType::Width || new_view_type == libvgcode::EViewType::VolumetricFlowRate ||
-        new_view_type == libvgcode::EViewType::ActualVolumetricFlowRate) {
+    if (!sliced_info_shown && (new_view_type == libvgcode::EViewType::Width || new_view_type == libvgcode::EViewType::VolumetricFlowRate ||
+        new_view_type == libvgcode::EViewType::ActualVolumetricFlowRate)) {
         const std::vector<libvgcode::EGCodeExtrusionRole>& roles = m_viewer.get_extrusion_roles();
         const auto custom_it = std::find(roles.begin(), roles.end(), libvgcode::EGCodeExtrusionRole::Custom);
         if (custom_it != roles.end()) {

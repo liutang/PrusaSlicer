@@ -7071,6 +7071,10 @@ void Plater::on_config_change(const DynamicPrintConfig &config)
     if (update_scheduled)
         update();
 
+    // The settings tabs of the selection show values inherited from the print settings.
+    if (ObjectSettingsTabs *tabs = p->sidebar->obj_settings_tabs())
+        tabs->reload();
+
     if (p->main_frame->is_loaded())
         this->p->schedule_background_process();
 }

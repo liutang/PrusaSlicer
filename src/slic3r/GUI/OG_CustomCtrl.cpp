@@ -93,7 +93,7 @@ void OG_CustomCtrl::init_ctrl_lines()
         {
             wxSize label_sz = GetTextExtent(line.label);
             height = label_sz.y * (label_sz.GetWidth() > int(opt_group->label_width * m_em_unit) ? 2 : 1) + m_v_gap;
-            ctrl_lines.emplace_back(CtrlLine(height, this, line, false, opt_group->staticbox));
+            ctrl_lines.emplace_back(CtrlLine(height, this, line, false, opt_group->staticbox && opt_group->show_mode_markers));
         }
         else
             assert(false);
@@ -133,7 +133,7 @@ wxPoint OG_CustomCtrl::get_pos(const Line& line, Field* field_in/* = nullptr*/)
     for (CtrlLine& ctrl_line : ctrl_lines) {
         if (&ctrl_line.og_line == &line)
         {
-            h_pos = m_bmp_mode_sz.GetWidth() + m_h_gap;
+            h_pos = (opt_group->show_mode_markers ? m_bmp_mode_sz.GetWidth() : 0) + m_h_gap;
             if (line.near_label_widget_win) {
                 wxSize near_label_widget_sz = line.near_label_widget_win->GetSize();
                 if (field_in)

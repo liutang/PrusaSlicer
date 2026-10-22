@@ -543,12 +543,15 @@ void ObjectList::set_tooltip_for_item(const wxPoint& pt)
 
     wxString tooltip = "";
 
-    if (col->GetTitle() == _(L("Editing")))
+    if (col->GetTitle() == _(L("Editing"))) {
 #ifdef __WXOSX__
         tooltip = _(L("Right button click the icon to change the object settings"));
 #else
         tooltip = _(L("Click the icon to change the object settings"));
 #endif //__WXMSW__
+        if (m_objects_model->HasSettings(item))
+            tooltip = _L("Has settings of its own, shown in orange in the settings tabs below.") + "\n" + tooltip;
+    }
     else if (col->GetTitle() == " ")
 #ifdef __WXOSX__
         tooltip = _(L("Right button click the icon to change the object printable property"));
@@ -2859,6 +2862,22 @@ void ObjectList::part_selection_changed()
     }
     wxGetApp().plater()->canvas3D()->handle_sidebar_focus_event(opt_key, !opt_key.empty());
     wxGetApp().plater()->canvas3D()->enable_moving(enable_manipulation); // ysFIXME
+
+    // The settings of the selection as tabs. Their first tab shows the Object manipulation or the height range,
+    // so these are only shown while it is active.
+    ObjectSettingsTabs::Kind      tabs_kind { ObjectSettingsTabs::Kind::Object };
+    std::vector<SettingsTabsItem> tabs_items;
+    // A Settings item shows the tabs of its object, part or height range instead of the list of its settings.
+    if (settings_tabs_items(tabs_kind, tabs_items)) {
+        update_and_show_settings = false;
+        const std::string icon = update_and_show_manipulations ? "move" : update_and_show_layers ? "edit_layers_some" : "";
+        wxGetApp().obj_settings_tabs()->show(tabs_kind, std::move(tabs_items), icon, icon.empty() ? wxString() : og_name);
+        const bool first_tab = wxGetApp().obj_settings_tabs()->first_tab_active();
+        update_and_show_manipulations &= first_tab;
+        update_and_show_layers        &= first_tab;
+    } else
+        wxGetApp().obj_settings_tabs()->hide();
+
     wxGetApp().obj_manipul() ->UpdateAndShow(update_and_show_manipulations);
     wxGetApp().obj_settings()->UpdateAndShow(update_and_show_settings);
     wxGetApp().obj_layers()  ->UpdateAndShow(update_and_show_layers);
@@ -2868,42 +2887,89 @@ void ObjectList::part_selection_changed()
     panel.Thaw();
 }
 
+void ObjectList::update_settings_item(wxDataViewItem item)
+{
+    if (item)
+        add_settings_item(item, &get_item_config(item).get());
+}
+
+bool ObjectList::settings_tabs_items(ObjectSettingsTabs::Kind &kind, std::vector<SettingsTabsItem> &items)
+{
+    items.clear();
+    if (printer_technology() != ptFFF)
+        return false;
+
+    wxDataViewItemArray sels;
+    GetSelections(sels);
+    if (sels.empty())
+        return false;
+
+    bool          kind_set = false;
+    std::set<int> objects;
+    for (wxDataViewItem item : sels) {
+        // The settings of an object, part or height range are those of their owner.
+        if (m_objects_model->GetItemType(item) & itSettings)
+            item = m_objects_model->GetParent(item);
+        const ItemType type    = m_objects_model->GetItemType(item);
+        const int      obj_idx = m_objects_model->GetObjectIdByItem(item);
+        if (obj_idx < 0 || obj_idx >= int(m_objects->size()))
+            return false;
+        ModelObject *object = (*m_objects)[obj_idx];
+
+        ObjectSettingsTabs::Kind item_kind;
+        if (type & (itObject | itInstance | itInstanceRoot)) {
+            item_kind = ObjectSettingsTabs::Kind::Object;
+            // Several instances of one object are one object.
+            if (objects.insert(obj_idx).second)
+                items.push_back({ m_objects_model->GetItemById(obj_idx), obj_idx, &object->config, nullptr });
+        } else if (type & itVolume) {
+            const int volume_idx = m_objects_model->GetVolumeIdByItem(item);
+            if (volume_idx < 0 || volume_idx >= int(object->volumes.size()))
+                return false;
+            ModelVolume *volume = object->volumes[volume_idx];
+            // Negative volumes, support blockers and enforcers have no print settings.
+            if (!volume->is_model_part() && !volume->is_modifier())
+                return false;
+            item_kind = ObjectSettingsTabs::Kind::Part;
+            items.push_back({ item, obj_idx, &volume->config, &object->config });
+        } else if (type & itLayer) {
+            item_kind = ObjectSettingsTabs::Kind::HeightRange;
+            items.push_back({ item, obj_idx, &get_item_config(item), &object->config });
+        } else
+            return false;
+
+        // A selection of objects together with parts has no settings in common.
+        if (kind_set && item_kind != kind)
+            return false;
+        kind     = item_kind;
+        kind_set = true;
+    }
+    return !items.empty();
+}
+
 // Add new SettingsItem for parent_item if it doesn't exist, or just update a digest according to new config
+// The settings of an object, part or height range are edited in the settings tabs of the sidebar, so the
+// list has no Settings items: the icon of the Editing column marks an item with settings of its own.
+// Returns the item if it has settings, so that selecting it shows them.
 wxDataViewItem ObjectList::add_settings_item(wxDataViewItem parent_item, const DynamicPrintConfig* config)
 {
-    wxDataViewItem ret = wxDataViewItem(nullptr);
-
     if (!parent_item)
-        return ret;
-
-    const bool is_object_settings = m_objects_model->GetItemType(parent_item) == itObject;
-    if (!is_object_settings) {
-        ModelVolumeType volume_type = m_objects_model->GetVolumeType(parent_item);
-        if (volume_type == ModelVolumeType::NEGATIVE_VOLUME || volume_type == ModelVolumeType::SUPPORT_BLOCKER || volume_type == ModelVolumeType::SUPPORT_ENFORCER ||
-            volume_type == ModelVolumeType::PRINT_ONLY_VOLUME)
-            return ret;
-    }
-
-    SettingsFactory::Bundle cat_options = SettingsFactory::get_bundle(config, is_object_settings);
-    if (cat_options.empty())
-        return ret;
-
-    std::vector<std::string> categories;
-    categories.reserve(cat_options.size());
-    for (auto& cat : cat_options)
-        categories.push_back(cat.first);
-
+        return wxDataViewItem(nullptr);
     if (m_objects_model->GetItemType(parent_item) & itInstance)
         parent_item = m_objects_model->GetTopParent(parent_item);
+    else if (m_objects_model->IsSettingsItem(parent_item))
+        parent_item = m_objects_model->GetParent(parent_item);
 
-    ret = m_objects_model->IsSettingsItem(parent_item) ? parent_item : m_objects_model->GetSettingsItem(parent_item);
+    const bool is_object_settings = m_objects_model->GetItemType(parent_item) == itObject;
+    bool has_settings = false;
+    if (is_object_settings || !(m_objects_model->GetItemType(parent_item) & itVolume) || [this, parent_item]() {
+            const ModelVolumeType volume_type = m_objects_model->GetVolumeType(parent_item);
+            return volume_type != ModelVolumeType::NEGATIVE_VOLUME && volume_type != ModelVolumeType::SUPPORT_BLOCKER &&
+                   volume_type != ModelVolumeType::SUPPORT_ENFORCER && volume_type != ModelVolumeType::PRINT_ONLY_VOLUME; }())
+        has_settings = !SettingsFactory::get_bundle(config, is_object_settings).empty();
 
-    if (!ret) ret = m_objects_model->AddSettingsChild(parent_item);
-
-    m_objects_model->UpdateSettingsDigest(ret, categories);
-    Expand(parent_item);
-
-    return ret;
+    m_objects_model->SetHasSettings(parent_item, has_settings);
+    return has_settings ? parent_item : wxDataViewItem(nullptr);
 }
 
 
