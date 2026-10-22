@@ -107,6 +107,20 @@ void GLGizmoMmuSegmentation::init_extruders_data()
     m_modified_extruders_colors    = m_original_extruders_colors;
     m_first_selected_extruder_idx  = 0;
     m_second_selected_extruder_idx = 1;
+    reset_extruder_remap();
+}
+
+// The number of filaments, which can be remapped.
+static size_t remappable_extruders_count(const std::vector<std::string> &names, const std::vector<ColorRGBA> &colors)
+{
+    return std::min({ names.size(), colors.size(), GLGizmoMmuSegmentation::EXTRUDERS_LIMIT });
+}
+
+void GLGizmoMmuSegmentation::reset_extruder_remap()
+{
+    m_extruder_remap.resize(remappable_extruders_count(m_original_extruders_names, m_original_extruders_colors));
+    for (size_t i = 0; i < m_extruder_remap.size(); ++i)
+        m_extruder_remap[i] = i;
 }
 
 bool GLGizmoMmuSegmentation::on_init()
@@ -146,6 +160,11 @@ bool GLGizmoMmuSegmentation::on_init()
     m_desc["split_triangles"]      = _u8L("Split triangles");
 
     m_desc["height_range_z_range"] = _u8L("Height range");
+
+    m_desc["remap_filaments"]      = _u8L("Remap filaments");
+    m_desc["remap"]                = _u8L("Remap");
+    m_desc["remap_reset"]          = _u8L("Reset");
+    m_desc["remap_to"]             = _u8L("To") + ":";
 
     init_extruders_data();
 
@@ -398,6 +417,8 @@ void GLGizmoMmuSegmentation::on_render_input_window(float x, float y, float bott
 
     const float max_tooltip_width = ImGui::GetFontSize() * 20.0f;
 
+    render_extruder_remap(max_tooltip_width);
+
     ImGui::Separator();
 
     ImGuiPureWrap::text(m_desc.at("tool_type"));
@@ -576,6 +597,173 @@ void GLGizmoMmuSegmentation::on_render_input_window(float x, float y, float bott
     ImGuiPureWrap::end();
 }
 
+// A square button filled with the color of a filament, labeled by its number. If the filament is remapped,
+// the lower right half shows the color of the filament it is remapped to.
+static bool filament_button(const std::string &id, int number, const ColorRGBA &color, const ColorRGBA *remapped_color, bool active)
+{
+    const float  size    = ImGui::GetFrameHeight() * 1.25f;
+    const ImVec2 p0      = ImGui::GetCursorScreenPos();
+    const ImVec2 p1(p0.x + size, p0.y + size);
+    const bool   clicked = ImGui::InvisibleButton(id.c_str(), ImVec2(size, size));
+    const bool   hovered = ImGui::IsItemHovered();
+    ImDrawList  *draw    = ImGui::GetWindowDrawList();
+    const float  rounding = 0.15f * size;
+
+    draw->AddRectFilled(p0, p1, ImGuiPSWrap::to_ImU32(color), rounding);
+    if (remapped_color != nullptr)
+        draw->AddTriangleFilled(ImVec2(p1.x, p0.y + rounding), ImVec2(p1.x, p1.y), ImVec2(p0.x + rounding, p1.y), ImGuiPSWrap::to_ImU32(*remapped_color));
+    draw->AddRect(p0, p1, (active || hovered) ? ImGui::GetColorU32(ImGuiPureWrap::COL_ORANGE_LIGHT) : IM_COL32(0, 0, 0, 255), rounding, 0, active ? 2.5f : 1.f);
+
+    // A dark or a light label, whichever is better readable on the color.
+    const float       luminance = 0.299f * color.r() + 0.587f * color.g() + 0.114f * color.b();
+    const std::string label     = std::to_string(number);
+    const ImVec2      text_size = ImGui::CalcTextSize(label.c_str());
+    draw->AddText(ImVec2(p0.x + 0.5f * (size - text_size.x), p0.y + 0.5f * (size - text_size.y)),
+        luminance > 0.55f ? IM_COL32(0, 0, 0, 255) : IM_COL32(255, 255, 255, 255), label.c_str());
+    return clicked;
+}
+
+std::vector<size_t> GLGizmoMmuSegmentation::used_extruders() const
+{
+    std::vector<bool> used(m_extruder_remap.size(), false);
+    if (const ModelObject *mo = m_c->selection_info()->model_object(); mo != nullptr)
+        for (const ModelVolume *mv : mo->volumes) {
+            if (! mv->is_model_part())
+                continue;
+            // Zero stands for the default extruder, which is the first one.
+            if (const size_t idx = size_t(std::max(mv->extruder_id(), 1) - 1); idx < used.size())
+                used[idx] = true;
+            const std::vector<bool> &used_states = mv->mm_segmentation_facets.get_data().used_states;
+            for (size_t state = size_t(TriangleStateType::Extruder1); state < used_states.size(); ++ state)
+                if (used_states[state] && state - size_t(TriangleStateType::Extruder1) < used.size())
+                    used[state - size_t(TriangleStateType::Extruder1)] = true;
+        }
+    std::vector<size_t> out;
+    for (size_t i = 0; i < used.size(); ++ i)
+        if (used[i])
+            out.emplace_back(i);
+    return out;
+}
+
+void GLGizmoMmuSegmentation::render_extruder_remap(float max_tooltip_width)
+{
+    if (m_extruder_remap.size() != remappable_extruders_count(m_original_extruders_names, m_original_extruders_colors))
+        reset_extruder_remap();
+
+    if (! ImGui::TreeNodeEx(m_desc.at("remap_filaments").c_str(), ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_FramePadding))
+        return;
+
+    const int max_per_line = 8;
+    int       displayed    = 0;
+    for (const size_t src : used_extruders()) {
+        if (displayed > 0 && displayed % max_per_line != 0)
+            ImGui::SameLine();
+        ++ displayed;
+
+        const size_t      dst    = m_extruder_remap[src];
+        const std::string popup  = "remap_popup_" + std::to_string(src);
+        if (filament_button("##remap_src_" + std::to_string(src), int(src) + 1, m_original_extruders_colors[src],
+                            dst != src ? &m_original_extruders_colors[dst] : nullptr, ImGui::IsPopupOpen(popup.c_str())))
+            ImGui::OpenPopup(popup.c_str());
+        if (ImGui::IsItemHovered())
+            ImGuiPureWrap::tooltip(dst != src ? m_original_extruders_names[src] + " >> " + m_original_extruders_names[dst] : m_original_extruders_names[src],
+                                   max_tooltip_width);
+
+        if (ImGui::BeginPopup(popup.c_str())) {
+            ImGuiPureWrap::text(m_desc.at("remap_to"));
+            for (size_t i = 0; i < m_extruder_remap.size(); ++ i) {
+                if (i > 0 && i % max_per_line != 0)
+                    ImGui::SameLine();
+                if (filament_button("##remap_dst_" + std::to_string(src) + "_" + std::to_string(i), int(i) + 1, m_original_extruders_colors[i], nullptr, i == dst)) {
+                    m_extruder_remap[src] = i;
+                    ImGui::CloseCurrentPopup();
+                }
+                if (ImGui::IsItemHovered())
+                    ImGuiPureWrap::tooltip(m_original_extruders_names[i], max_tooltip_width);
+            }
+            ImGui::EndPopup();
+        }
+    }
+
+    bool has_remap = false;
+    for (size_t i = 0; i < m_extruder_remap.size(); ++ i)
+        has_remap |= m_extruder_remap[i] != i;
+
+    m_imgui->disabled_begin(! has_remap);
+    if (ImGuiPureWrap::button(m_desc.at("remap"))) {
+        remap_extruders();
+        reset_extruder_remap();
+    }
+    m_imgui->disabled_end();
+    if (has_remap) {
+        ImGui::SameLine();
+        if (ImGuiPureWrap::button(m_desc.at("remap_reset")))
+            reset_extruder_remap();
+    }
+
+    ImGui::TreePop();
+}
+
+void GLGizmoMmuSegmentation::remap_extruders()
+{
+    ModelObject *mo = m_c->selection_info()->model_object();
+    if (mo == nullptr)
+        return;
+
+    std::map<TriangleStateType, TriangleStateType> state_remap;
+    for (size_t src = 0; src < m_extruder_remap.size(); ++ src)
+        if (m_extruder_remap[src] != src)
+            state_remap[TriangleStateType(size_t(TriangleStateType::Extruder1) + src)] = TriangleStateType(size_t(TriangleStateType::Extruder1) + m_extruder_remap[src]);
+    if (state_remap.empty())
+        return;
+
+    Plater::TakeSnapshot snapshot(wxGetApp().plater(), _L("Remap filaments"), UndoRedo::SnapshotType::GizmoAction);
+
+    // The painted triangles.
+    int idx = -1;
+    for (ModelVolume *mv : mo->volumes)
+        if (mv->is_model_part()) {
+            ++ idx;
+            m_triangle_selectors[idx]->remap_states(state_remap);
+            m_triangle_selectors[idx]->request_update_render_data();
+        }
+    update_model_object();
+
+    // The filaments of the whole parts. A part either has its own filament, or it uses the filament of the object.
+    // The new filaments are found first, so that a part using the filament of the object, which is changed for a previous part,
+    // is not remapped twice.
+    auto remapped = [this](int extruder_id) {
+        // Zero stands for the default extruder, which is the first one.
+        const size_t src = size_t(std::max(extruder_id, 1) - 1);
+        return src < m_extruder_remap.size() && m_extruder_remap[src] != src ? int(m_extruder_remap[src]) + 1 : 0;
+    };
+    std::vector<std::pair<ModelVolume*, int>> volume_extruders;
+    int  object_extruder         = 0;
+    for (ModelVolume *mv : mo->volumes)
+        if (mv->is_model_part()) {
+            const ConfigOption *opt = mv->config.option("extruder");
+            if (opt != nullptr && opt->getInt() != 0) {
+                if (const int dst = remapped(opt->getInt()); dst != 0)
+                    volume_extruders.emplace_back(mv, dst);
+            } else if (object_extruder == 0) {
+                const ConfigOption *object_opt = mo->config.option("extruder");
+                object_extruder = remapped(object_opt != nullptr ? object_opt->getInt() : 0);
+            }
+        }
+    for (const auto &[mv, dst] : volume_extruders)
+        mv->config.set("extruder", dst);
+    if (object_extruder != 0)
+        mo->config.set("extruder", object_extruder);
+
+    if (! volume_extruders.empty() || object_extruder != 0) {
+        wxGetApp().obj_list()->update_extruder_values_for_items(size_t(wxGetApp().extruders_edited_cnt()));
+        // The color of the unpainted triangles follows the filament of the part.
+        init_model_triangle_selectors();
+        wxGetApp().plater()->update();
+    }
+    m_parent.set_as_dirty();
+}
+
 void GLGizmoMmuSegmentation::update_model_object() const
 {
     bool updated = false;
@@ -635,6 +823,8 @@ void GLGizmoMmuSegmentation::update_from_model_object()
         this->init_extruders_data();
 
     this->init_model_triangle_selectors();
+    // The selected object may have changed, its filaments are remapped from scratch.
+    this->reset_extruder_remap();
 }
 
 PainterGizmoType GLGizmoMmuSegmentation::get_painter_type() const
