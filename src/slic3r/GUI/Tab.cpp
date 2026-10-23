@@ -1082,20 +1082,20 @@ static wxString pad_combo_value_for_config(const DynamicPrintConfig &config)
 // Suggest the recommended support interface settings after the support interface extruder was changed to a material,
 // which does not bond to the model (PETG on PLA, PLA on PETG or flexible materials), or to a soluble material
 // over a non-soluble support base. Ported from OrcaSlicer.
-static void suggest_support_interface_settings(Tab *tab)
+DynamicPrintConfig suggest_support_interface_settings(const DynamicPrintConfig &config, const std::vector<const ModelObject*> &objects)
 {
-    const DynamicPrintConfig &config = *tab->get_config();
+    DynamicPrintConfig changes;
     const int interface_extruder = config.opt_int("support_material_interface_extruder") - 1;
     const int base_extruder      = config.opt_int("support_material_extruder") - 1;
     if (interface_extruder < 0)
         // The interface is printed with the current extruder.
-        return;
+        return changes;
 
     const DynamicPrintConfig  full_config      = wxGetApp().preset_bundle->full_config();
     const ConfigOptionStrings *filament_types  = full_config.option<ConfigOptionStrings>("filament_type");
     const ConfigOptionBools   *filament_soluble = full_config.option<ConfigOptionBools>("filament_soluble");
     if (filament_types == nullptr || filament_soluble == nullptr || interface_extruder >= int(filament_types->values.size()))
-        return;
+        return changes;
 
     auto is_soluble = [filament_soluble](int extruder) {
         return extruder >= 0 && extruder < int(filament_soluble->values.size()) && filament_soluble->values[extruder] != 0;
@@ -1116,7 +1116,7 @@ static void suggest_support_interface_settings(Tab *tab)
             model_has_flexible |= is_flexible(type);
         }
     };
-    for (const ModelObject *object : wxGetApp().plater()->model().objects)
+    for (const ModelObject *object : objects)
         for (const ModelVolume *volume : object->volumes)
             if (volume->is_model_part()) {
                 // Zero stands for the default extruder, which is the first one.
@@ -1163,7 +1163,7 @@ static void suggest_support_interface_settings(Tab *tab)
     const bool set_bed_temperature_extruder = bed_temperature_undecided && ! model_bed_temperatures_differ;
 
     if (! soluble_over_non_soluble && ! (non_bonding_interface && (! already_set || set_bed_temperature_extruder)))
-        return;
+        return changes;
 
     wxString msg_text = is_soluble(interface_extruder) ?
         _L("When using soluble material for the support interface, we recommend the following settings:\n"
@@ -1184,19 +1184,30 @@ static void suggest_support_interface_settings(Tab *tab)
     // The native message box is too narrow for this text on macOS.
     WarningDialog dialog(wxGetApp().plater(), msg_text, _L("Suggestion"), wxYES | wxNO);
     if (dialog.ShowModal() == wxID_YES) {
-        DynamicPrintConfig new_conf = config;
-        new_conf.set_key_value("support_material_contact_distance", new ConfigOptionFloat(0));
-        new_conf.set_key_value("support_material_interface_spacing", new ConfigOptionFloat(0));
-        new_conf.set_key_value("support_material_interface_pattern", new ConfigOptionEnum<SupportMaterialInterfacePattern>(smipRectilinear));
-        new_conf.set_key_value("support_material_synchronize_layers", new ConfigOptionBool(true));
+        changes.set_key_value("support_material_contact_distance", new ConfigOptionFloat(0));
+        changes.set_key_value("support_material_interface_spacing", new ConfigOptionFloat(0));
+        changes.set_key_value("support_material_interface_pattern", new ConfigOptionEnum<SupportMaterialInterfacePattern>(smipRectilinear));
+        changes.set_key_value("support_material_synchronize_layers", new ConfigOptionBool(true));
         if (! slow(interface_speed))
-            new_conf.set_key_value("support_material_interface_speed", new ConfigOptionFloatOrPercent(20., false));
+            changes.set_key_value("support_material_interface_speed", new ConfigOptionFloatOrPercent(20., false));
         if (! slow(interface_bridging_speed))
-            new_conf.set_key_value("support_material_interface_bridging_speed", new ConfigOptionFloat(20.));
+            changes.set_key_value("support_material_interface_bridging_speed", new ConfigOptionFloat(20.));
         if ((is_pla(interface_type) && model_has_flexible) || soluble_over_non_soluble)
-            new_conf.set_key_value("support_material_extruder", new ConfigOptionInt(interface_extruder + 1));
+            changes.set_key_value("support_material_extruder", new ConfigOptionInt(interface_extruder + 1));
         if (set_bed_temperature_extruder)
-            new_conf.set_key_value("bed_temperature_extruder", new ConfigOptionInt(int(*model_extruders.begin()) + 1));
+            changes.set_key_value("bed_temperature_extruder", new ConfigOptionInt(int(*model_extruders.begin()) + 1));
+    }
+    return changes;
+}
+
+static void suggest_support_interface_settings(Tab *tab)
+{
+    const ModelObjectPtrs &objects = wxGetApp().plater()->model().objects;
+    const DynamicPrintConfig changes = suggest_support_interface_settings(*tab->get_config(),
+        std::vector<const ModelObject*>(objects.begin(), objects.end()));
+    if (! changes.empty()) {
+        DynamicPrintConfig new_conf = *tab->get_config();
+        new_conf.apply(changes);
         tab->load_config(new_conf);
     }
 }

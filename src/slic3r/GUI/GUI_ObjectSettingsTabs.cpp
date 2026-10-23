@@ -538,6 +538,52 @@ void ObjectSettingsTabs::on_value_change(const std::string &opt_id)
         item.config->set_key_value(key, option->clone());
     apply_config_manipulation(true);
     after_items_changed();
+
+    // Once the event of the edited field is over: the suggestion may change the Print Settings, which rebuilds
+    // the page with that field.
+    if (key == "support_material_interface_extruder")
+        wxTheApp->CallAfter([this]() {
+            if (m_shown && m_kind == Kind::Object && !m_items.empty())
+                suggest_support_interface_settings();
+        });
+}
+
+void ObjectSettingsTabs::suggest_support_interface_settings()
+{
+    // As in the Print Settings, for the filaments of the selected objects only.
+    std::vector<const ModelObject*> objects;
+    for (const SettingsTabsItem &item : m_items)
+        if (const ModelObject *object = wxGetApp().model().objects[item.obj_idx];
+            std::find(objects.begin(), objects.end(), object) == objects.end())
+            objects.push_back(object);
+    const DynamicPrintConfig changes = GUI::suggest_support_interface_settings(m_config, objects);
+    if (changes.empty())
+        return;
+
+    // The settings of the support are stored on the selected objects; the bed temperature extruder is a setting
+    // of the whole print, so it changes in the Print Settings.
+    wxGetApp().plater()->take_snapshot(_L("Support interface settings"));
+    DynamicPrintConfig print_changes;
+    for (const std::string &key : changes.keys()) {
+        if (m_allowed.find(key) != m_allowed.end()) {
+            for (SettingsTabsItem &item : m_items)
+                item.config->set_key_value(key, changes.option(key)->clone());
+        } else
+            print_changes.set_key_value(key, changes.option(key)->clone());
+    }
+    compute_config();
+    for (auto &group : m_groups)
+        group->reload_config();
+    apply_config_manipulation(false);
+    after_items_changed();
+
+    // Last, as loading the Print Settings selects the object anew, which rebuilds this page.
+    if (!print_changes.empty())
+        if (Tab *tab = wxGetApp().get_tab(Preset::TYPE_PRINT)) {
+            DynamicPrintConfig new_conf = *tab->get_config();
+            new_conf.apply(print_changes);
+            tab->load_config(new_conf);
+        }
 }
 
 void ObjectSettingsTabs::on_revert(const std::string &opt_id)

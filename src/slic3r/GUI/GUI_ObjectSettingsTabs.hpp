@@ -83,6 +83,8 @@ private:
     void        update_override_marks();
     void        apply_config_manipulation(bool check_values);
     void        on_value_change(const std::string &opt_id);
+    // The suggestion of the Print Settings for a support interface of a different or soluble material.
+    void        suggest_support_interface_settings();
     void        on_revert(const std::string &opt_id);
     void        after_items_changed();
     // The page shown, or nullptr for the first tab.
