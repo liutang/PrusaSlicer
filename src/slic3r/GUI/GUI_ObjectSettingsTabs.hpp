@@ -47,6 +47,13 @@ public:
     bool        first_tab_active() const;
     // Whether a page of settings is shown, which then takes the height of the sidebar left.
     bool        page_shown() const { return m_shown && active_page() != nullptr; }
+    bool        shown() const { return m_shown; }
+    // The panels of the first tab (Object manipulation, height range, object info), placed between the tabs and the page.
+    void        set_first_tab_sizer(wxSizer *sizer);
+    wxSizer*    first_tab_sizer() const { return m_first_tab_sizer; }
+    // Below the panels of the first tab is empty room, so that the tabs stay where they are for every tab.
+    void        stretch_first_tab(bool stretch);
+    int         tab_bar_height() const;
 
     // first_tab_icon / first_tab_name describe the first tab; an empty icon if the selection has no such panel.
     void        show(Kind kind, std::vector<SettingsTabsItem> items, const std::string &first_tab_icon, const wxString &first_tab_name);
@@ -96,6 +103,8 @@ private:
     wxScrolledWindow*                   m_page_window;
     wxBoxSizer*                         m_page_sizer;
     wxString                            m_built_title;
+    wxSizer*                            m_first_tab_sizer { nullptr };
+    wxSizerItem*                        m_first_tab_spacer { nullptr };
     TabBar*                             m_tab_bar;
 
     Kind                                m_kind { Kind::Object };

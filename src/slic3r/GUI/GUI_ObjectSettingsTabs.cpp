@@ -197,7 +197,7 @@ ObjectSettingsTabs::ObjectSettingsTabs(wxWindow *parent) :
     m_page_window = new wxScrolledWindow(parent, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxVSCROLL);
     m_page_window->SetScrollRate(0, 10);
     // Below this height the whole sidebar scrolls instead.
-    m_page_window->SetMinSize(wxSize(-1, 15 * wxGetApp().em_unit()));
+    m_page_window->SetMinSize(wxSize(-1, 8 * wxGetApp().em_unit()));
 #ifdef _WIN32
     wxGetApp().UpdateDarkUI(m_page_window);
 #elif !defined(__APPLE__)
@@ -284,7 +284,25 @@ void ObjectSettingsTabs::hide()
     m_items.clear();
     m_shown = false;
     m_built_title.clear();
-    wxGetApp().sidebar().set_object_settings_layout(Sidebar::SettingsTabsLayout::None);
+}
+
+void ObjectSettingsTabs::set_first_tab_sizer(wxSizer *sizer)
+{
+    m_first_tab_sizer = sizer;
+    m_sizer->Insert(1, sizer, 0, wxEXPAND);
+    m_first_tab_spacer = m_sizer->AddStretchSpacer(0);
+}
+
+void ObjectSettingsTabs::stretch_first_tab(bool stretch)
+{
+    if (m_first_tab_spacer != nullptr)
+        m_first_tab_spacer->SetProportion(stretch ? 1 : 0);
+}
+
+int ObjectSettingsTabs::tab_bar_height() const
+{
+    // The tab bar and its border.
+    return m_tab_bar->GetMinSize().y + 5;
 }
 
 void ObjectSettingsTabs::select_tab(int tab)
@@ -363,7 +381,6 @@ void ObjectSettingsTabs::build_page()
     clear_page();
     const PageDef *page = active_page();
     m_page_window->Show(page != nullptr);
-    wxGetApp().sidebar().set_object_settings_layout(page != nullptr ? Sidebar::SettingsTabsLayout::Page : Sidebar::SettingsTabsLayout::FirstTab);
     if (page == nullptr) {
         m_built_title.clear();
         return;
