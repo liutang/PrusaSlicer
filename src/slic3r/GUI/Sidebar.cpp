@@ -468,6 +468,12 @@ Sidebar::Sidebar(Plater *parent)
 {
     m_scrolled_panel = new wxScrolledWindow(this);
     m_scrolled_panel->SetScrollRate(0, 5);
+    // The object list and the object settings tabs share the height of the sidebar.
+    m_scrolled_panel->Bind(wxEVT_SIZE, [this](wxSizeEvent &evt) {
+        if (m_object_list != nullptr && m_object_settings_tabs != nullptr && m_scrolled_panel->GetSizer() != nullptr)
+            update_object_settings_heights();
+        evt.Skip();
+    });
 
     SetFont(wxGetApp().normal_font());
 #ifndef __APPLE__
@@ -641,32 +647,32 @@ Sidebar::Sidebar(Plater *parent)
     m_object_list = new ObjectList(m_scrolled_panel);
     params_sizer->Add(m_object_list->get_sizer(), 1, wxEXPAND);
 
-    // Settings of the selected objects, parts or height ranges as tabs; the first tab shows the
-    // Object manipulation or the height range below.
+    // Settings of the selected objects, parts or height ranges as tabs. The first tab shows the panels below,
+    // which are shown without the tabs as well, e.g. for a selection of objects and parts together.
     m_object_settings_tabs = std::make_unique<ObjectSettingsTabs>(m_scrolled_panel);
     params_sizer->Add(m_object_settings_tabs->get_sizer(), 0, wxEXPAND);
+    auto *first_tab_sizer = new wxBoxSizer(wxVERTICAL);
 
     // Object Manipulations
     m_object_manipulation = std::make_unique<ObjectManipulation>(m_scrolled_panel);
     m_object_manipulation->Hide();
-    params_sizer->Add(m_object_manipulation->get_sizer(), 0, wxEXPAND | wxTOP, margin_5);
+    first_tab_sizer->Add(m_object_manipulation->get_sizer(), 0, wxEXPAND | wxTOP, margin_5);
 
     // Frequently Object Settings
     m_object_settings = std::make_unique<ObjectSettings>(m_scrolled_panel);
     m_object_settings->Hide();
-    params_sizer->Add(m_object_settings->get_sizer(), 0, wxEXPAND | wxTOP, margin_5);
+    first_tab_sizer->Add(m_object_settings->get_sizer(), 0, wxEXPAND | wxTOP, margin_5);
 
     // Object Layers
     m_object_layers = std::make_unique<ObjectLayers>(m_scrolled_panel);
     m_object_layers->Hide();
-    params_sizer->Add(m_object_layers->get_sizer(), 0, wxEXPAND | wxTOP, margin_5);
-    // Takes the height left below Object manipulation or the height range while the first tab of the
-    // object settings is shown, so that the tabs stay where they are for every tab.
-    m_params_spacer = params_sizer->AddStretchSpacer(0);
+    first_tab_sizer->Add(m_object_layers->get_sizer(), 0, wxEXPAND | wxTOP, margin_5);
 
     // Info boxes
     m_object_info = new ObjectInfo(m_scrolled_panel);
     m_sliced_info = new SlicedInfo(m_scrolled_panel);
+    first_tab_sizer->Add(m_object_info, 0, wxEXPAND | wxTOP, margin_5);
+    m_object_settings_tabs->set_first_tab_sizer(first_tab_sizer);
 
     int size_margin = wxGTK3 ? wxLEFT | wxRIGHT : wxLEFT;
 
@@ -674,7 +680,6 @@ Sidebar::Sidebar(Plater *parent)
         scrolled_sizer->Add(m_presets_panel, 0, wxEXPAND | size_margin, margin_5) :
         scrolled_sizer->Add(m_presets_sizer, 0, wxEXPAND | size_margin, margin_5);
     scrolled_sizer->Add(params_sizer, 1, wxEXPAND | size_margin, margin_5);
-    scrolled_sizer->Add(m_object_info, 0, wxEXPAND | wxTOP | size_margin, margin_5);
     scrolled_sizer->Add(m_sliced_info, 0, wxEXPAND | wxTOP | size_margin, margin_5);
 
     // Buttons underneath the scrolled area
@@ -1215,14 +1220,32 @@ ObjectSettingsTabs* Sidebar::obj_settings_tabs()
 
 void Sidebar::set_object_settings_layout(SettingsTabsLayout layout)
 {
-    // While the tabs are shown, the object list keeps the height of its items; a page of settings fills the
-    // rest, below the panel of the first tab is empty room.
+    m_settings_tabs_layout = layout;
+    if (layout == SettingsTabsLayout::FirstTab)
+        m_first_tab_min_height = std::max(m_first_tab_min_height, m_object_settings_tabs->first_tab_sizer()->CalcMin().y);
+    m_object_settings_tabs->stretch_first_tab(layout == SettingsTabsLayout::FirstTab);
+    // While the tabs are shown, the object list gets the height worked out below and the tabs the rest.
     if (wxSizerItem *item = m_params_sizer->GetItem(m_object_list->get_sizer()))
         item->SetProportion(layout == SettingsTabsLayout::None ? 1 : 0);
     if (wxSizerItem *item = m_params_sizer->GetItem(m_object_settings_tabs->get_sizer()))
-        item->SetProportion(layout == SettingsTabsLayout::Page ? 1 : 0);
-    if (m_params_spacer != nullptr)
-        m_params_spacer->SetProportion(layout == SettingsTabsLayout::FirstTab ? 1 : 0);
+        item->SetProportion(layout == SettingsTabsLayout::None ? 0 : 1);
+    update_object_settings_heights();
+}
+
+void Sidebar::update_object_settings_heights()
+{
+    if (m_settings_tabs_layout == SettingsTabsLayout::None || ! m_object_list->IsShown()) {
+        m_object_list->set_min_height_for_tabs(0);
+        return;
+    }
+    // The object list and the tabs share the height of the sidebar left for them half and half, as in OrcaSlicer,
+    // as long as the tabs keep room for the panels of the first tab. The tabs stay where they are for every tab.
+    const int em          = wxGetApp().em_unit();
+    const int tabs_height = m_object_settings_tabs->tab_bar_height() + std::max(m_first_tab_min_height, 8 * em);
+    const int others      = m_scrolled_panel->GetSizer()->CalcMin().y - m_object_list->GetMinSize().y -
+                            m_object_settings_tabs->get_sizer()->CalcMin().y;
+    const int available   = m_scrolled_panel->GetClientSize().y - others;
+    m_object_list->set_min_height_for_tabs(std::max(10 * em, std::min(available / 2, available - tabs_height)));
 }
 
 ObjectSettings* Sidebar::obj_settings()

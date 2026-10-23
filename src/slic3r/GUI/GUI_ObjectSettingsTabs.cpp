@@ -197,7 +197,7 @@ ObjectSettingsTabs::ObjectSettingsTabs(wxWindow *parent) :
     m_page_window = new wxScrolledWindow(parent, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxVSCROLL);
     m_page_window->SetScrollRate(0, 10);
     // Below this height the whole sidebar scrolls instead.
-    m_page_window->SetMinSize(wxSize(-1, 15 * wxGetApp().em_unit()));
+    m_page_window->SetMinSize(wxSize(-1, 8 * wxGetApp().em_unit()));
 #ifdef _WIN32
     wxGetApp().UpdateDarkUI(m_page_window);
 #elif !defined(__APPLE__)
@@ -284,7 +284,25 @@ void ObjectSettingsTabs::hide()
     m_items.clear();
     m_shown = false;
     m_built_title.clear();
-    wxGetApp().sidebar().set_object_settings_layout(Sidebar::SettingsTabsLayout::None);
+}
+
+void ObjectSettingsTabs::set_first_tab_sizer(wxSizer *sizer)
+{
+    m_first_tab_sizer = sizer;
+    m_sizer->Insert(1, sizer, 0, wxEXPAND);
+    m_first_tab_spacer = m_sizer->AddStretchSpacer(0);
+}
+
+void ObjectSettingsTabs::stretch_first_tab(bool stretch)
+{
+    if (m_first_tab_spacer != nullptr)
+        m_first_tab_spacer->SetProportion(stretch ? 1 : 0);
+}
+
+int ObjectSettingsTabs::tab_bar_height() const
+{
+    // The tab bar and its border.
+    return m_tab_bar->GetMinSize().y + 5;
 }
 
 void ObjectSettingsTabs::select_tab(int tab)
@@ -363,7 +381,6 @@ void ObjectSettingsTabs::build_page()
     clear_page();
     const PageDef *page = active_page();
     m_page_window->Show(page != nullptr);
-    wxGetApp().sidebar().set_object_settings_layout(page != nullptr ? Sidebar::SettingsTabsLayout::Page : Sidebar::SettingsTabsLayout::FirstTab);
     if (page == nullptr) {
         m_built_title.clear();
         return;
@@ -538,6 +555,52 @@ void ObjectSettingsTabs::on_value_change(const std::string &opt_id)
         item.config->set_key_value(key, option->clone());
     apply_config_manipulation(true);
     after_items_changed();
+
+    // Once the event of the edited field is over: the suggestion may change the Print Settings, which rebuilds
+    // the page with that field.
+    if (key == "support_material_interface_extruder")
+        wxTheApp->CallAfter([this]() {
+            if (m_shown && m_kind == Kind::Object && !m_items.empty())
+                suggest_support_interface_settings();
+        });
+}
+
+void ObjectSettingsTabs::suggest_support_interface_settings()
+{
+    // As in the Print Settings, for the filaments of the selected objects only.
+    std::vector<const ModelObject*> objects;
+    for (const SettingsTabsItem &item : m_items)
+        if (const ModelObject *object = wxGetApp().model().objects[item.obj_idx];
+            std::find(objects.begin(), objects.end(), object) == objects.end())
+            objects.push_back(object);
+    const DynamicPrintConfig changes = GUI::suggest_support_interface_settings(m_config, objects);
+    if (changes.empty())
+        return;
+
+    // The settings of the support are stored on the selected objects; the bed temperature extruder is a setting
+    // of the whole print, so it changes in the Print Settings.
+    wxGetApp().plater()->take_snapshot(_L("Support interface settings"));
+    DynamicPrintConfig print_changes;
+    for (const std::string &key : changes.keys()) {
+        if (m_allowed.find(key) != m_allowed.end()) {
+            for (SettingsTabsItem &item : m_items)
+                item.config->set_key_value(key, changes.option(key)->clone());
+        } else
+            print_changes.set_key_value(key, changes.option(key)->clone());
+    }
+    compute_config();
+    for (auto &group : m_groups)
+        group->reload_config();
+    apply_config_manipulation(false);
+    after_items_changed();
+
+    // Last, as loading the Print Settings selects the object anew, which rebuilds this page.
+    if (!print_changes.empty())
+        if (Tab *tab = wxGetApp().get_tab(Preset::TYPE_PRINT)) {
+            DynamicPrintConfig new_conf = *tab->get_config();
+            new_conf.apply(print_changes);
+            tab->load_config(new_conf);
+        }
 }
 
 void ObjectSettingsTabs::on_revert(const std::string &opt_id)

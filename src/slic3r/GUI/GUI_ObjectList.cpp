@@ -305,7 +305,17 @@ void ObjectList::set_min_height()
     if (m_items_count == size_t(-1))
         m_items_count = 7;
     int list_min_height = lround(2.25 * (m_items_count + 1) * wxGetApp().em_unit()); // +1 is for height of control header
+    if (m_min_height_for_tabs > 0)
+        list_min_height = m_min_height_for_tabs;
     this->SetMinSize(wxSize(1, list_min_height));
+}
+
+void ObjectList::set_min_height_for_tabs(int height)
+{
+    if (m_min_height_for_tabs == height)
+        return;
+    m_min_height_for_tabs = height;
+    set_min_height();
 }
 
 void ObjectList::update_min_height()
@@ -2882,6 +2892,9 @@ void ObjectList::part_selection_changed()
     wxGetApp().obj_settings()->UpdateAndShow(update_and_show_settings);
     wxGetApp().obj_layers()  ->UpdateAndShow(update_and_show_layers);
     wxGetApp().sidebar().show_info_sizer();
+    ObjectSettingsTabs *tabs = wxGetApp().obj_settings_tabs();
+    wxGetApp().sidebar().set_object_settings_layout(! tabs->shown() ? Sidebar::SettingsTabsLayout::None :
+                                                    tabs->page_shown() ? Sidebar::SettingsTabsLayout::Page : Sidebar::SettingsTabsLayout::FirstTab);
 
     panel.Layout();
     panel.Thaw();
