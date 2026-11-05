@@ -4,6 +4,8 @@
 ///|/
 #include <algorithm>
 #include <cassert>
+#include <set>
+#include <string>
 
 #include "../Print.hpp"
 #include "../PrintConfig.hpp"
@@ -14,20 +16,54 @@
 
 namespace Slic3r::FFFSupport {
 
-// Is the support base printed with the same extruder as the support interface?
+// Is the support base printed with the same extruder as the support interface? Then the support regions may be merged.
 static bool same_extruder_for_base_and_interface(const PrintObject &object)
 {
     const PrintObjectConfig &object_config = object.config();
-    if (object_config.support_material_extruder.value == object_config.support_material_interface_extruder.value)
+    const int base_extruder      = object_config.support_material_extruder.value;
+    const int interface_extruder = object_config.support_material_interface_extruder.value;
+    if (base_extruder == interface_extruder)
         return true;
-    if (object_config.support_material_extruder.value == 0 || object_config.support_material_interface_extruder.value == 0) {
-        // One of the support extruders is of "don't care" type.
+    if (base_extruder == 0)
+        // A "don't care" support base is kept off the extruder of the support interface whenever another extruder
+        // prints at the layer, see translate_support_extruder() in GCode/ExtrusionOrder.cpp.
+        return false;
+    if (interface_extruder == 0) {
+        // A "don't care" support interface: the same as the base, if the object is printed with the extruder of the base.
+        // The object extruders are zero based, the support extruders one based.
         auto object_extruders = object.object_extruders();
-        if (object_extruders.size() == 1 &&
-            *object_extruders.begin() == std::max<unsigned int>(object_config.support_material_extruder.value, object_config.support_material_interface_extruder.value))
-            // Object is printed with the same extruder as the support.
+        if (object_extruders.size() == 1 && *object_extruders.begin() + 1 == (unsigned int)base_extruder)
             return true;
     }
+    return false;
+}
+
+// Are the support base and the support interface printed with filaments of a different type (PLA and PETG, for example)?
+// A "don't care" extruder may print with any non-soluble filament the print uses; a "don't care" support base however
+// is kept off the extruder of the support interface, see translate_support_extruder() in GCode/ExtrusionOrder.cpp.
+static bool different_filament_types_for_base_and_interface(const PrintObject &object)
+{
+    const PrintConfig       &print_config       = object.print()->config();
+    const PrintObjectConfig &object_config      = object.config();
+    const int                base_extruder      = object_config.support_material_extruder.value;
+    const int                interface_extruder = object_config.support_material_interface_extruder.value;
+
+    auto possible_types = [&print_config, &object](int extruder, int avoided_extruder) {
+        std::set<std::string> types;
+        if (extruder > 0)
+            types.insert(print_config.filament_type.get_at(extruder - 1));
+        else
+            for (unsigned int idx : object.print()->extruders())
+                if (! print_config.filament_soluble.get_at(idx) && int(idx) + 1 != avoided_extruder)
+                    types.insert(print_config.filament_type.get_at(idx));
+        return types;
+    };
+    const std::set<std::string> base_types      = possible_types(base_extruder, interface_extruder);
+    const std::set<std::string> interface_types = possible_types(interface_extruder, 0);
+    for (const std::string &base_type : base_types)
+        for (const std::string &interface_type : interface_types)
+            if (base_type != interface_type)
+                return true;
     return false;
 }
 
@@ -46,8 +82,9 @@ static bool is_soluble_interface_non_soluble_base(const PrintObject &object)
 
 bool SupportParameters::additional_base_interface_layer(const PrintObject &object)
 {
+    // The interface layer printed over the sparse support base only sticks to it, if both are of the same material.
     return object.config().support_material_interface_layers.value > 0 &&
-        ! is_soluble_interface_non_soluble_base(object) && ! same_extruder_for_base_and_interface(object);
+        ! is_soluble_interface_non_soluble_base(object) && different_filament_types_for_base_and_interface(object);
 }
 
 SupportParameters::SupportParameters(const PrintObject &object)

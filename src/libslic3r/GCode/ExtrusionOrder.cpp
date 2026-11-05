@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cassert>
 #include <cinttypes>
+#include <optional>
+#include <vector>
 
 #include "libslic3r/GCode/SmoothPath.hpp"
 #include "libslic3r/ShortestPath.hpp"
@@ -334,27 +336,40 @@ unsigned translate_support_extruder(
     const LayerTools &layer_tools,
     const ConfigOptionBools &is_soluable,
     // 1 based extruder, which shall not print the "don't care" material if another one is available. Zero if there is none.
-    const int avoided_extruder = 0
+    const int avoided_extruder = 0,
+    // 0 based extruders of the supported object.
+    const std::vector<unsigned int> &object_extruders = {}
 ) {
-    if (configured_extruder <= 0) {
-        if (avoided_extruder > 0) {
-            // Don't print the "don't care" support base with the support interface material,
-            // if there is another non-soluble extruder available at this layer.
-            auto it = std::find_if(layer_tools.extruders.begin(), layer_tools.extruders.end(),
-                [&is_soluable, avoided_extruder](unsigned int extruder_id) { return ! is_soluable.get_at(extruder_id) && int(extruder_id) != avoided_extruder - 1; });
-            if (it != layer_tools.extruders.end())
-                return *it;
-        }
-        // Some support will be printed with "don't care" material, preferably non-soluble.
-        // Is the current extruder assigned a soluble filament?
-        auto it_nonsoluble = std::find_if(layer_tools.extruders.begin(), layer_tools.extruders.end(),
-            [&is_soluable](unsigned int extruder_id) { return ! is_soluable.get_at(extruder_id); });
-        // There should be a non-soluble extruder available.
-        assert(it_nonsoluble != layer_tools.extruders.end());
-        return it_nonsoluble == layer_tools.extruders.end() ? layer_tools.extruders.front() : *it_nonsoluble;
-    } else {
+    if (configured_extruder > 0)
         return configured_extruder - 1;
-    }
+
+    // Some support will be printed with "don't care" material, preferably non-soluble, by an extruder printing at this
+    // layer anyway. It is the same one at every layer where possible, so that the support doesn't alternate between
+    // filaments, which may not stick to each other: the extruder of the supported object if it is printed with one only,
+    // otherwise the first one by number, not the first one in the order of the layer, which changes from layer to layer.
+    auto on_layer = [&layer_tools](unsigned int extruder_id) {
+        return std::find(layer_tools.extruders.begin(), layer_tools.extruders.end(), extruder_id) != layer_tools.extruders.end();
+    };
+    auto first_by_number = [&layer_tools](auto &&predicate) -> std::optional<unsigned int> {
+        std::optional<unsigned int> out;
+        for (unsigned int extruder_id : layer_tools.extruders)
+            if (predicate(extruder_id) && (! out || extruder_id < *out))
+                out = extruder_id;
+        return out;
+    };
+    // Don't print the "don't care" support base with the support interface material, if there is another non-soluble
+    // extruder available at this layer.
+    auto usable = [&is_soluable, avoided_extruder](unsigned int extruder_id) {
+        return ! is_soluable.get_at(extruder_id) && int(extruder_id) != avoided_extruder - 1;
+    };
+    if (object_extruders.size() == 1 && usable(object_extruders.front()) && on_layer(object_extruders.front()))
+        return object_extruders.front();
+    if (std::optional<unsigned int> extruder_id = first_by_number(usable))
+        return *extruder_id;
+    std::optional<unsigned int> nonsoluble = first_by_number([&is_soluable](unsigned int extruder_id) { return ! is_soluable.get_at(extruder_id); });
+    // There should be a non-soluble extruder available.
+    assert(nonsoluble);
+    return nonsoluble ? *nonsoluble : layer_tools.extruders.front();
 }
 
 std::vector<SupportPath> get_support_extrusions(
@@ -474,12 +489,14 @@ std::vector<NormalExtrusions> get_normal_extrusions(
         result.back().instance_offset = offset;
 
         if (layers[instance.object_layer_to_print_id].support_layer != nullptr) {
+            const std::vector<unsigned int> object_extruders = print_object.object_extruders();
             result.back().support_extrusions = get_support_extrusions(
                 extruder_id,
                 layers[instance.object_layer_to_print_id],
                 translate_support_extruder(instance.print_object.config().support_material_extruder.value, layer_tools, print.config().filament_soluble,
-                    instance.print_object.config().support_material_interface_extruder.value),
-                translate_support_extruder(instance.print_object.config().support_material_interface_extruder.value, layer_tools, print.config().filament_soluble),
+                    instance.print_object.config().support_material_interface_extruder.value, object_extruders),
+                translate_support_extruder(instance.print_object.config().support_material_interface_extruder.value, layer_tools, print.config().filament_soluble,
+                    0, object_extruders),
                 smooth_path,
                 previous_position
             );

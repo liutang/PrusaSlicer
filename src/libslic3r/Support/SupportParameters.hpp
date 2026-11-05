@@ -24,10 +24,11 @@ namespace FFFSupport {
 struct SupportParameters {
 	SupportParameters(const PrintObject &object);
 
-    // Is the support interface printed with a different extruder than the support base, while not being the case
-    // of a soluble interface over a non-soluble base? Then one dense layer is printed with the support base extruder
-    // below the top interface layers, so that the interface material does not need to bridge the sparse support base,
-    // and another one above the bottom interface layers. These layers are added to the configured number of interface layers.
+    // Is the support interface printed with a filament of a different type than the support base (PLA and PETG, for example),
+    // while not being the case of a soluble interface over a non-soluble base? Then one dense layer is printed with the
+    // support base extruder below the top interface layers, so that the interface material does not need to bridge the
+    // sparse support base it doesn't stick to, and another one above the bottom interface layers. These layers are added
+    // to the configured number of interface layers.
     static bool             additional_base_interface_layer(const PrintObject &object);
 
     // Both top / bottom contacts and interfaces are soluble.
