@@ -1310,8 +1310,12 @@ void GCodeGenerator::_do_export(Print& print, GCodeOutputStream &file, Thumbnail
         const PrintObject *prev_object = (*print_object_instance_sequential_active)->print_object;
         for (; print_object_instance_sequential_active != print_object_instances_ordering.end(); ++ print_object_instance_sequential_active) {
             const PrintObject &object = *(*print_object_instance_sequential_active)->print_object;
-            if (&object != prev_object || tool_ordering.first_extruder() != final_extruder_id) {
-                tool_ordering = ToolOrdering(object, final_extruder_id);
+            // Each object takes its filaments in the order it would print with by layer: its first
+            // layer starts with its lowest-numbered filament, not with the one left loaded by the
+            // object before. The first object's ordering was made that way above, and every
+            // instance of an object shares its ordering.
+            if (&object != prev_object) {
+                tool_ordering = ToolOrdering(object, (unsigned int)-1);
                 unsigned int new_extruder_id = tool_ordering.first_extruder();
                 if (new_extruder_id == (unsigned int)-1)
                     // Skip this object.
