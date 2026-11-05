@@ -52,6 +52,7 @@ class MainFrame;
 class Sidebar;
 class ObjectManipulation;
 class ObjectSettings;
+class ObjectSettingsTabs;
 class ObjectList;
 class ObjectLayers;
 class Plater;
@@ -343,6 +344,7 @@ public:
     Sidebar&             sidebar();
     ObjectManipulation*  obj_manipul();
     ObjectSettings*      obj_settings();
+    ObjectSettingsTabs*  obj_settings_tabs();
     ObjectList*          obj_list();
     ObjectLayers*        obj_layers();
     Plater*              plater();

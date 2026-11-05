@@ -60,6 +60,7 @@
 #include "GUI_ObjectList.hpp"
 #include "GUI_ObjectManipulation.hpp"
 #include "GUI_ObjectLayers.hpp"
+#include "GUI_ObjectSettingsTabs.hpp"
 #include "wxExtensions.hpp"
 #include "format.hpp"
 #include "Selection.hpp"
@@ -294,8 +295,19 @@ public:
     SlicedInfo(wxWindow *parent);
     void SetTextAndShow(SlicedInfoIdx idx, const wxString& text, const wxString& new_label="");
 
+    struct Row {
+        wxString label;
+        wxString value;
+        bool     shown { false };
+    };
+    const std::vector<Row>& rows() const { return m_rows; }
+    // The FFF sliced info is shown in the legend of the preview: only the rows are kept, the labels stay hidden.
+    void set_show_widgets(bool show) { m_show_widgets = show; }
+
 private:
     std::vector<std::pair<wxStaticText*, wxStaticText*>> info_vec;
+    std::vector<Row> m_rows;
+    bool             m_show_widgets { true };
 };
 
 SlicedInfo::SlicedInfo(wxWindow *parent) :
@@ -317,6 +329,7 @@ SlicedInfo::SlicedInfo(wxWindow *parent) :
         grid_sizer->Add(text, 0);
         grid_sizer->Add(info_label, 0);
         info_vec.push_back(std::pair<wxStaticText*, wxStaticText*>(text, info_label));
+        m_rows.push_back({ text_label, "N/A", false });
     };
 
     init_info_label(_L("Used Filament (g)"));
@@ -334,12 +347,17 @@ SlicedInfo::SlicedInfo(wxWindow *parent) :
 void SlicedInfo::SetTextAndShow(SlicedInfoIdx idx, const wxString& text, const wxString& new_label/*=""*/)
 {
     const bool show = text != "N/A";
-    if (show)
+    if (show) {
         info_vec[idx].second->SetLabelText(text);
-    if (!new_label.IsEmpty())
+        m_rows[idx].value = text;
+    }
+    if (!new_label.IsEmpty()) {
         info_vec[idx].first->SetLabelText(new_label);
-    info_vec[idx].first->Show(show);
-    info_vec[idx].second->Show(show);
+        m_rows[idx].label = new_label;
+    }
+    m_rows[idx].shown = show;
+    info_vec[idx].first->Show(show && m_show_widgets);
+    info_vec[idx].second->Show(show && m_show_widgets);
 }
 
 
@@ -450,6 +468,12 @@ Sidebar::Sidebar(Plater *parent)
 {
     m_scrolled_panel = new wxScrolledWindow(this);
     m_scrolled_panel->SetScrollRate(0, 5);
+    // The object list and the object settings tabs share the height of the sidebar.
+    m_scrolled_panel->Bind(wxEVT_SIZE, [this](wxSizeEvent &evt) {
+        if (m_object_list != nullptr && m_object_settings_tabs != nullptr && m_scrolled_panel->GetSizer() != nullptr)
+            update_object_settings_heights();
+        evt.Skip();
+    });
 
     SetFont(wxGetApp().normal_font());
 #ifndef __APPLE__
@@ -607,6 +631,7 @@ Sidebar::Sidebar(Plater *parent)
     init_workflow_combo(margin_5);
 
     wxBoxSizer* params_sizer = new wxBoxSizer(wxVERTICAL);
+    m_params_sizer = params_sizer;
 
     // Frequently changed parameters
     m_frequently_changed_parameters = std::make_unique<FreqChangedParams>(m_scrolled_panel);
@@ -622,24 +647,32 @@ Sidebar::Sidebar(Plater *parent)
     m_object_list = new ObjectList(m_scrolled_panel);
     params_sizer->Add(m_object_list->get_sizer(), 1, wxEXPAND);
 
+    // Settings of the selected objects, parts or height ranges as tabs. The first tab shows the panels below,
+    // which are shown without the tabs as well, e.g. for a selection of objects and parts together.
+    m_object_settings_tabs = std::make_unique<ObjectSettingsTabs>(m_scrolled_panel);
+    params_sizer->Add(m_object_settings_tabs->get_sizer(), 0, wxEXPAND);
+    auto *first_tab_sizer = new wxBoxSizer(wxVERTICAL);
+
     // Object Manipulations
     m_object_manipulation = std::make_unique<ObjectManipulation>(m_scrolled_panel);
     m_object_manipulation->Hide();
-    params_sizer->Add(m_object_manipulation->get_sizer(), 0, wxEXPAND | wxTOP, margin_5);
+    first_tab_sizer->Add(m_object_manipulation->get_sizer(), 0, wxEXPAND | wxTOP, margin_5);
 
     // Frequently Object Settings
     m_object_settings = std::make_unique<ObjectSettings>(m_scrolled_panel);
     m_object_settings->Hide();
-    params_sizer->Add(m_object_settings->get_sizer(), 0, wxEXPAND | wxTOP, margin_5);
+    first_tab_sizer->Add(m_object_settings->get_sizer(), 0, wxEXPAND | wxTOP, margin_5);
 
     // Object Layers
     m_object_layers = std::make_unique<ObjectLayers>(m_scrolled_panel);
     m_object_layers->Hide();
-    params_sizer->Add(m_object_layers->get_sizer(), 0, wxEXPAND | wxTOP, margin_5);
+    first_tab_sizer->Add(m_object_layers->get_sizer(), 0, wxEXPAND | wxTOP, margin_5);
 
     // Info boxes
     m_object_info = new ObjectInfo(m_scrolled_panel);
     m_sliced_info = new SlicedInfo(m_scrolled_panel);
+    first_tab_sizer->Add(m_object_info, 0, wxEXPAND | wxTOP, margin_5);
+    m_object_settings_tabs->set_first_tab_sizer(first_tab_sizer);
 
     int size_margin = wxGTK3 ? wxLEFT | wxRIGHT : wxLEFT;
 
@@ -647,7 +680,6 @@ Sidebar::Sidebar(Plater *parent)
         scrolled_sizer->Add(m_presets_panel, 0, wxEXPAND | size_margin, margin_5) :
         scrolled_sizer->Add(m_presets_sizer, 0, wxEXPAND | size_margin, margin_5);
     scrolled_sizer->Add(params_sizer, 1, wxEXPAND | size_margin, margin_5);
-    scrolled_sizer->Add(m_object_info, 0, wxEXPAND | wxTOP | size_margin, margin_5);
     scrolled_sizer->Add(m_sliced_info, 0, wxEXPAND | wxTOP | size_margin, margin_5);
 
     // Buttons underneath the scrolled area
@@ -1118,6 +1150,7 @@ void Sidebar::msw_rescale()
     m_object_list                  ->msw_rescale();
     m_object_manipulation          ->msw_rescale();
     m_object_layers                ->msw_rescale();
+    m_object_settings_tabs         ->msw_rescale();
 
 #ifdef _WIN32
     const int scaled_height = m_btn_export_gcode_removable->GetBitmapHeight();
@@ -1158,6 +1191,7 @@ void Sidebar::sys_color_changed()
         combo->sys_color_changed();
 
     m_object_list        ->sys_color_changed();
+    m_object_settings_tabs->sys_color_changed();
     m_object_manipulation->sys_color_changed();
     m_object_layers      ->sys_color_changed();
 
@@ -1177,6 +1211,41 @@ ObjectManipulation* Sidebar::obj_manipul()
 ObjectList* Sidebar::obj_list()
 {
     return m_object_list;
+}
+
+ObjectSettingsTabs* Sidebar::obj_settings_tabs()
+{
+    return m_object_settings_tabs.get();
+}
+
+void Sidebar::set_object_settings_layout(SettingsTabsLayout layout)
+{
+    m_settings_tabs_layout = layout;
+    if (layout == SettingsTabsLayout::FirstTab)
+        m_first_tab_min_height = std::max(m_first_tab_min_height, m_object_settings_tabs->first_tab_sizer()->CalcMin().y);
+    m_object_settings_tabs->stretch_first_tab(layout == SettingsTabsLayout::FirstTab);
+    // While the tabs are shown, the object list gets the height worked out below and the tabs the rest.
+    if (wxSizerItem *item = m_params_sizer->GetItem(m_object_list->get_sizer()))
+        item->SetProportion(layout == SettingsTabsLayout::None ? 1 : 0);
+    if (wxSizerItem *item = m_params_sizer->GetItem(m_object_settings_tabs->get_sizer()))
+        item->SetProportion(layout == SettingsTabsLayout::None ? 0 : 1);
+    update_object_settings_heights();
+}
+
+void Sidebar::update_object_settings_heights()
+{
+    if (m_settings_tabs_layout == SettingsTabsLayout::None || ! m_object_list->IsShown()) {
+        m_object_list->set_min_height_for_tabs(0);
+        return;
+    }
+    // The object list and the tabs share the height of the sidebar left for them half and half, as in OrcaSlicer,
+    // as long as the tabs keep room for the panels of the first tab. The tabs stay where they are for every tab.
+    const int em          = wxGetApp().em_unit();
+    const int tabs_height = m_object_settings_tabs->tab_bar_height() + std::max(m_first_tab_min_height, 8 * em);
+    const int others      = m_scrolled_panel->GetSizer()->CalcMin().y - m_object_list->GetMinSize().y -
+                            m_object_settings_tabs->get_sizer()->CalcMin().y;
+    const int available   = m_scrolled_panel->GetClientSize().y - others;
+    m_object_list->set_min_height_for_tabs(std::max(10 * em, std::min(available / 2, available - tabs_height)));
 }
 
 ObjectSettings* Sidebar::obj_settings()
@@ -1206,6 +1275,11 @@ void Sidebar::update_objects_list_extruder_column(size_t extruders_count)
 
 void Sidebar::show_info_sizer()
 {
+    // The info about the object goes with Object manipulation, not with a page of its settings.
+    if (m_object_settings_tabs && m_object_settings_tabs->page_shown()) {
+        m_object_info->Show(false);
+        return;
+    }
     Selection& selection = wxGetApp().plater()->canvas3D()->get_selection();
     ModelObjectPtrs objects = m_plater->model().objects;
     const int obj_idx = selection.get_object_idx();
@@ -1278,7 +1352,7 @@ void Sidebar::show_info_sizer()
 
 void Sidebar::update_sliced_info_sizer()
 {
-    if (m_sliced_info->IsShown(size_t(0)))
+    if (m_sliced_info_valid)
     {
         if (m_plater->printer_technology() == ptSLA)
         {
@@ -1515,12 +1589,30 @@ void Sidebar::show_sliced_info_sizer(const bool show)
 
     wxWindowUpdateLocker freeze_guard(this);
 
-    m_sliced_info->Show(show);
+    // The sliced info of a FFF print is shown in the legend of the preview instead of the sidebar, so that it
+    // doesn't take the room of the settings and goes away with the preview.
+    const bool in_sidebar = m_plater->printer_technology() == ptSLA;
+    m_sliced_info_valid   = show;
+    m_sliced_info->set_show_widgets(in_sidebar);
+    m_sliced_info->Show(show && in_sidebar);
     if (show)
         update_sliced_info_sizer();
 
     Layout();
     m_scrolled_panel->Refresh();
+    if (!in_sidebar)
+        if (GLCanvas3D *canvas = m_plater->get_current_canvas3D())
+            canvas->set_as_dirty();
+}
+
+std::vector<std::pair<std::string, std::string>> Sidebar::sliced_info_rows() const
+{
+    std::vector<std::pair<std::string, std::string>> rows;
+    if (m_sliced_info_valid)
+        for (const SlicedInfo::Row &row : m_sliced_info->rows())
+            if (row.shown)
+                rows.emplace_back(into_u8(row.label), into_u8(row.value));
+    return rows;
 }
 
 void Sidebar::show_btns_sizer(const bool show)

@@ -119,6 +119,8 @@ public:
     const bool		staticbox {true};
     const wxString	title;
     size_t			label_width = 20 ;// {200};
+    // Draw the mode (Simple / Advanced / Expert) marker in front of each line of a group with a title.
+    bool			show_mode_markers { true };
     wxSizer*		sizer {nullptr};
 	OG_CustomCtrl*  custom_ctrl{ nullptr };
 	int				ctrl_horiz_alignment{ wxALIGN_LEFT};

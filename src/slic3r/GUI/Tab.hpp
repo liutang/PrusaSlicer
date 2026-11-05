@@ -54,7 +54,13 @@
 class CheckBox;
 
 namespace Slic3r {
+class ModelObject;
 namespace GUI {
+
+// For a support interface of a different or a soluble material, ask whether to change the settings
+// recommended for it. config holds the settings the support is printed with, objects are those it is
+// printed for. Returns the settings to change, empty if there is nothing to suggest or the user declined.
+DynamicPrintConfig suggest_support_interface_settings(const DynamicPrintConfig &config, const std::vector<const ModelObject*> &objects);
 
 class TabPresetComboBox;
 class OG_CustomCtrl;
@@ -314,6 +320,8 @@ public:
 
 	wxWindow*	parent() const { return m_parent; }
 	wxString	title()	 const { return m_title; }
+	// The pages of the tab, also used to lay out the settings of objects in the sidebar.
+	const std::vector<PageShp>& get_pages() const { return m_pages; }
 	std::string	name()	 const { return m_presets->name(); }
     Preset::Type type()  const { return m_type; }
     // The tab is already constructed.

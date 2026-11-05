@@ -88,6 +88,8 @@ class ObjectDataViewModelNode
     bool                            m_has_lock{false};
 
     std::string                     m_action_icon_name = "";
+    // The object, part or height range has settings of its own; shown by the icon of the Editing column.
+    bool                            m_has_settings { false };
     ModelVolumeType                 m_volume_type{ -1 };
     bool                            m_is_text_volume{ false };
     bool                            m_is_svg_volume{false};
@@ -236,6 +238,9 @@ public:
 
     // Set action and extruder(if any exist) icons for node
     void        set_action_and_extruder_icons();
+    void        set_action_icon();
+    void        set_has_settings(bool has_settings);
+    bool        has_settings() const { return m_has_settings; }
     // set extruder icon for node
     void        set_extruder_icon();
 	// Set printable icon for node
@@ -388,6 +393,9 @@ public:
     wxDataViewItem  GetInfoItemByType(const wxDataViewItem &parent_item, InfoItemType type) const;
 
     bool    IsSettingsItem(const wxDataViewItem &item) const;
+    // Mark an object, part or height range as having settings of its own.
+    void    SetHasSettings(const wxDataViewItem &item, bool has_settings);
+    bool    HasSettings(const wxDataViewItem &item) const;
     void    UpdateSettingsDigest(   const wxDataViewItem &item,
                                     const std::vector<std::string>& categories);
 

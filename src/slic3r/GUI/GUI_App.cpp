@@ -3253,6 +3253,11 @@ ObjectSettings* GUI_App::obj_settings()
     return sidebar().obj_settings();
 }
 
+ObjectSettingsTabs* GUI_App::obj_settings_tabs()
+{
+    return plater_ ? sidebar().obj_settings_tabs() : nullptr;
+}
+
 ObjectList* GUI_App::obj_list()
 {
     // If this method is called before plater_ has been initialized, return nullptr (to avoid a crash)
