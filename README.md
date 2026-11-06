@@ -1,11 +1,11 @@
 
 ![PrusaSlicer logo](/resources/icons/PrusaSlicer.png?raw=true)
 
-# PrusaSlicer 2.9.6 Extended
+# PrusaSlicer 2.9.7 Extended
 
-PrusaSlicer 2.9.6 Extended is a community fork of PrusaSlicer 2.9.6 that adds quality of life improvements to the stable 2.x release, with a focus on multi-color and multi-material printing on the Bondtech INDX.
+PrusaSlicer 2.9.7 Extended is a community fork of PrusaSlicer 2.9.7 that adds quality of life improvements to the stable 2.x release, with a focus on multi-color and multi-material printing on the Bondtech INDX.
 
-PrusaSlicer 2.9.6 is the last release of the 2.x line. Prusa has moved its development to PrusaSlicer 3.x, which is not ready yet. Until it is, this fork keeps 2.9.6 as the base and builds on it:
+PrusaSlicer 2.9 is the last version of the 2.x line, and Prusa now publishes only maintenance releases of it, such as 2.9.7 with its security fixes. Prusa has moved its development to PrusaSlicer 3.x, which is not ready yet. Until it is, this fork follows the latest 2.9 maintenance release as its base and builds on it:
 
 * Improvements for multi-toolhead printing, especially the 8-toolhead INDX
 * Selected improvements ported from [OrcaSlicer](https://github.com/OrcaSlicer/OrcaSlicer) where they are needed
@@ -20,7 +20,7 @@ Please report problems with this fork in its [issues](https://github.com/liutang
 
 ## Disclaimer
 
-PrusaSlicer 2.9.6 Extended is an independent community project. It is not affiliated with, endorsed by, or supported by Prusa Research, Bondtech, or the OrcaSlicer project. Please do not contact them about problems with this fork.
+PrusaSlicer 2.9.7 Extended is an independent community project. It is not affiliated with, endorsed by, or supported by Prusa Research, Bondtech, or the OrcaSlicer project. Please do not contact them about problems with this fork.
 
 "Prusa", "PrusaSlicer", "Bondtech", "INDX" and "OrcaSlicer" are names and trademarks of their respective owners. They are used here only to describe what this software is based on and which hardware it works with.
 
